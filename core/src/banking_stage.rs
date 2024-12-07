@@ -776,6 +776,23 @@ impl BankingStage {
         let mut last_metrics_update = Instant::now();
 
         loop {
+            // 获取未确认的交易
+            let unprocessed_transactions = match &unprocessed_transaction_storage {
+                UnprocessedTransactionStorage::LocalTransactionStorage(transaction_storage) => {
+                    transaction_storage.get_unprocessed_packets()
+                }
+
+
+                UnprocessedTransactionStorage::VoteStorage(vote_storage) => {
+                    // vote_storage.get_unprocessed_packets()
+                    Vec::new()
+                }
+                UnprocessedTransactionStorage::BundleStorage(_) => {
+                    // Bundles don't support getting unprocessed packets
+                    Vec::new()
+                }
+            };
+
             if !unprocessed_transaction_storage.is_empty()
                 || last_metrics_update.elapsed() >= SLOT_BOUNDARY_CHECK_PERIOD
             {

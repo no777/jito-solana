@@ -660,6 +660,15 @@ impl ThreadLocalUnprocessedPackets {
         self.unprocessed_packet_batches.is_empty()
     }
 
+
+    pub fn get_unprocessed_packets(&self) -> Vec<&DeserializedPacket> {
+        self.unprocessed_packet_batches
+            .message_hash_to_transaction
+            .values()
+            .collect()
+    }
+
+
     pub fn thread_type(&self) -> ThreadType {
         self.thread_type
     }
