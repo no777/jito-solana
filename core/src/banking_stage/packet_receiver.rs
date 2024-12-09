@@ -52,6 +52,7 @@ impl PacketReceiver {
                     |packet| {
                         packet.check_insufficent_compute_unit_limit()?;
                         packet.check_excessive_precompiles()?;
+                        // info!("packet {:?}", packet);
                         Ok(packet)
                     },
                 )
@@ -111,6 +112,8 @@ impl PacketReceiver {
     ) {
         let packet_count = deserialized_packets.len();
         debug!("@{:?} txs: {} id: {}", timestamp(), packet_count, self.id);
+
+        info!("deserialized_packets {:?}", deserialized_packets);
 
         slot_metrics_tracker.increment_received_packet_counts(packet_stats);
         if let Some(new_sigverify_stats) = &new_tracer_stats_option {

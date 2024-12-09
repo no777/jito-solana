@@ -149,6 +149,9 @@ impl Tpu {
             transactions_forwards_quic: transactions_forwards_quic_sockets,
         } = sockets;
 
+
+        info!("create TPU");
+
         // Packets from fetch stage and quic server are intercepted and sent through fetch_stage_manager
         // If relayer is connected, packets are dropped. If not, packets are forwarded on to packet_sender
         let (packet_intercept_sender, packet_intercept_receiver) = unbounded();

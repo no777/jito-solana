@@ -143,6 +143,7 @@ members = [
     "zk-keygen",
     "zk-sdk",
     "zk-token-sdk",
+    "my-minimal-jito-validator",
 ]
 
 exclude = [
@@ -430,6 +431,9 @@ solana-svm-conformance = { path = "svm-conformance", version = "=2.1.0" }
 solana-svm-transaction = { path = "svm-transaction", version = "=2.1.0" }
 solana-system-program = { path = "programs/system", version = "=2.1.0" }
 solana-test-validator = { path = "test-validator", version = "=2.1.0" }
+solana-validator-lite = { path = "validator-lite", version = "=2.1.0" }
+
+
 solana-thin-client = { path = "thin-client", version = "=2.1.0" }
 solana-tpu-client = { path = "tpu-client", version = "=2.1.0", default-features = false }
 solana-transaction-status = { path = "transaction-status", version = "=2.1.0" }

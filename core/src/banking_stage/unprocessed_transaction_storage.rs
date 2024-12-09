@@ -526,6 +526,9 @@ impl UnprocessedTransactionStorage {
 }
 
 impl VoteStorage {
+
+  
+    
     fn is_empty(&self) -> bool {
         self.latest_unprocessed_votes.is_empty()
     }

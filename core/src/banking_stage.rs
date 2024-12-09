@@ -776,26 +776,14 @@ impl BankingStage {
         let mut last_metrics_update = Instant::now();
 
         loop {
-            // 获取未确认的交易
-            let unprocessed_transactions = match &unprocessed_transaction_storage {
-                UnprocessedTransactionStorage::LocalTransactionStorage(transaction_storage) => {
-                    transaction_storage.get_unprocessed_packets()
-                }
-
-
-                UnprocessedTransactionStorage::VoteStorage(vote_storage) => {
-                    // vote_storage.get_unprocessed_packets()
-                    Vec::new()
-                }
-                UnprocessedTransactionStorage::BundleStorage(_) => {
-                    // Bundles don't support getting unprocessed packets
-                    Vec::new()
-                }
-            };
+     
 
             if !unprocessed_transaction_storage.is_empty()
                 || last_metrics_update.elapsed() >= SLOT_BOUNDARY_CHECK_PERIOD
             {
+                
+
+
                 let (_, process_buffered_packets_time) = measure!(
                     Self::process_buffered_packets(
                         decision_maker,
@@ -824,6 +812,24 @@ impl BankingStage {
                 Ok(()) | Err(RecvTimeoutError::Timeout) => (),
                 Err(RecvTimeoutError::Disconnected) => break,
             }
+            
+            // Get unprocessed transactions
+            let unprocessed_transactions = match &unprocessed_transaction_storage {
+                UnprocessedTransactionStorage::LocalTransactionStorage(transaction_storage) => {
+                    transaction_storage.get_unprocessed_packets()
+                }
+                UnprocessedTransactionStorage::VoteStorage(vote_storage) => {
+                    Vec::new()
+                }
+                UnprocessedTransactionStorage::BundleStorage(_) => {
+                    Vec::new()
+                }
+            };
+            info!("unprocessed_transaction_storage {}", unprocessed_transaction_storage.len());
+
+            for packet in unprocessed_transactions.iter() {
+                info!("packet {:?}", packet);
+            }   
             banking_stage_stats.report(1000);
         }
     }

@@ -61,6 +61,7 @@ solana-send-transaction-service = { workspace = true }
 solana-storage-bigtable = { workspace = true }
 solana-streamer = { workspace = true }
 solana-test-validator = { workspace = true }
+solana-validator-lite = { workspace = true }
 solana-tpu-client = { workspace = true }
 solana-unified-scheduler-pool = { workspace = true }
 solana-version = { workspace = true }
@@ -69,6 +70,7 @@ symlink = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true, features = ["tls", "tls-roots", "tls-webpki-roots"] }
+#solana-transaction-info = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

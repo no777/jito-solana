@@ -25,6 +25,13 @@ use {
     },
 };
 
+use std::fs::OpenOptions;
+use std::io::Write;
+// use solana_perf::packet::Packet;
+use solana_sdk::transaction::Transaction;
+use bincode;
+
+
 pub struct FetchStage {
     thread_hdls: Vec<JoinHandle<()>>,
 }
@@ -38,10 +45,12 @@ impl FetchStage {
         poh_recorder: &Arc<RwLock<PohRecorder>>,
         coalesce: Duration,
     ) -> (Self, PacketBatchReceiver, PacketBatchReceiver) {
+
         let (sender, receiver) = unbounded();
         let (vote_sender, vote_receiver) = unbounded();
         let (forward_sender, forward_receiver) = unbounded();
         (
+
             Self::new_with_sender(
                 sockets,
                 tpu_forwards_sockets,
@@ -79,6 +88,9 @@ impl FetchStage {
         let tx_sockets = sockets.into_iter().map(Arc::new).collect();
         let tpu_forwards_sockets = tpu_forwards_sockets.into_iter().map(Arc::new).collect();
         let tpu_vote_sockets = tpu_vote_sockets.into_iter().map(Arc::new).collect();
+
+        info!("create FetchStage");
+
         Self::new_multi_socket(
             tx_sockets,
             tpu_forwards_sockets,
@@ -103,7 +115,8 @@ impl FetchStage {
         let mark_forwarded = |packet: &mut Packet| {
             packet.meta_mut().flags |= PacketFlags::FORWARDED;
         };
-
+        info!("handle_forwarded_packets");
+        
         let mut packet_batch = recvr.recv()?;
         let mut num_packets = packet_batch.len();
         packet_batch.iter_mut().for_each(mark_forwarded);
@@ -115,6 +128,15 @@ impl FetchStage {
             // Read at most 1K transactions in a loop
             if num_packets > 1024 {
                 break;
+            }
+        }
+
+
+        for batch in &packet_batches {
+            info!("output_packet_as_transaction ");
+            for packet in batch.iter() {
+                output_packet_as_transaction(packet);
+                
             }
         }
 
@@ -278,3 +300,40 @@ impl FetchStage {
         Ok(())
     }
 }
+
+
+pub fn output_packet_as_transaction(packet: &Packet) {
+    // Get the packet data and handle the Option
+    if let Some(data) = packet.data(..packet.meta().size) {
+        // Attempt to deserialize the transaction
+        let tx_result: std::result::Result<Transaction, Box<bincode::ErrorKind>> = bincode::deserialize(data);
+
+        match tx_result {
+            Ok(tx) => {
+                // 将交易信息格式化成可读字符串（使用Debug或自定义格式）
+                // 这里使用 Debug 输出，实际中可根据需要解析指令详情
+                let tx_info = format!("{:?}", tx);
+
+                // 将信息写入日志文件
+                if let Ok(mut file) = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("unconfirmed_transactions.log") 
+                {
+                    let _ = writeln!(file, "{}", tx_info);
+                }
+            }
+            Err(e) => {
+                // 如果反序列化失败，可选择记录错误信息，以便调试
+                if let Ok(mut file) = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("unconfirmed_transactions.log") 
+                {
+                    let _ = writeln!(file, "Failed to deserialize transaction: {:?}", e);
+                }
+            }
+        }
+    }
+}
+
