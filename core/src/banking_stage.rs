@@ -813,23 +813,23 @@ impl BankingStage {
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             
-            // Get unprocessed transactions
-            let unprocessed_transactions = match &unprocessed_transaction_storage {
-                UnprocessedTransactionStorage::LocalTransactionStorage(transaction_storage) => {
-                    transaction_storage.get_unprocessed_packets()
-                }
-                UnprocessedTransactionStorage::VoteStorage(vote_storage) => {
-                    Vec::new()
-                }
-                UnprocessedTransactionStorage::BundleStorage(_) => {
-                    Vec::new()
-                }
-            };
-            info!("unprocessed_transaction_storage {}", unprocessed_transaction_storage.len());
+            // // Get unprocessed transactions
+            // let unprocessed_transactions = match &unprocessed_transaction_storage {
+            //     UnprocessedTransactionStorage::LocalTransactionStorage(transaction_storage) => {
+            //         transaction_storage.get_unprocessed_packets()
+            //     }
+            //     UnprocessedTransactionStorage::VoteStorage(vote_storage) => {
+            //         Vec::new()
+            //     }
+            //     UnprocessedTransactionStorage::BundleStorage(_) => {
+            //         Vec::new()
+            //     }
+            // };
+            // info!("unprocessed_transaction_storage {}", unprocessed_transaction_storage.len());
 
-            for packet in unprocessed_transactions.iter() {
-                info!("packet {:?}", packet);
-            }   
+            // for packet in unprocessed_transactions.iter() {
+            //     info!("packet {:?}", packet);
+            // }   
             banking_stage_stats.report(1000);
         }
     }

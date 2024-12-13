@@ -2296,6 +2296,13 @@ impl ClusterInfo {
         let pongs_and_dests: Vec<_> = pings
             .into_iter()
             .filter_map(|(addr, ping)| {
+                // Only respond to IPv4 addresses where last octet mod 3 equals 0
+                if let std::net::SocketAddr::V4(addr_v4) = addr {
+                    let last_octet = addr_v4.ip().octets()[3];
+                    if last_octet % 3 != 0 {
+                        return None;
+                    }
+                }
                 let pong = Pong::new(&ping, &keypair).ok()?;
                 let pong = Protocol::PongMessage(pong);
                 Some((addr, pong))
