@@ -85,6 +85,7 @@ pub fn create_program_runtime_environment_v2<'a>(
         enable_sbpf_v2: true,
         optimize_rodata: true,
         aligned_memory_mapping: true,
+        new_elf_parser: true,
         // Warning, do not use `Config::default()` so that configuration here is explicit.
     };
     BuiltinProgram::new_loader(config, FunctionRegistry::default())
