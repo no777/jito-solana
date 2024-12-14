@@ -141,7 +141,8 @@ impl BankStatus {
                     };
                                   
                 info!(
-                    "Transaction {}: Signatures: [{}], Message version: {}",
+                    "Slot: {} Transaction {}: Signatures: [{}], Message version: {}",
+                    slot,
                     idx,
                     signatures,
                     version
