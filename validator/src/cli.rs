@@ -2634,6 +2634,18 @@ pub fn test_app<'a>(version: &'a str, default_args: &'a DefaultTestArgs) -> App<
                 .default_value("test-ledger")
                 .help("Use DIR as ledger location"),
         )
+
+        .arg(
+            Arg::with_name("entrypoint")
+                .short("n")
+                .long("entrypoint")
+                .value_name("HOST:PORT")
+                .takes_value(true)
+                .multiple(true)
+                .validator(solana_net_utils::is_host_port)
+                .help("Rendezvous with the cluster at this gossip entrypoint"),
+        )
+        
         .arg(
             Arg::with_name("reset")
                 .short("r")
