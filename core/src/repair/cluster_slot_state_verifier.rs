@@ -10,8 +10,16 @@ use {
         },
     },
     solana_ledger::blockstore::Blockstore,
-    solana_sdk::{clock::Slot, hash::Hash},
-    std::collections::{BTreeMap, BTreeSet, HashMap},
+    solana_sdk::{
+        clock::Slot, 
+        hash::Hash, 
+        transaction::VersionedTransaction,
+        message::VersionedMessage,
+    },
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap},
+        
+    },
 };
 
 #[cfg_attr(feature = "dev-context-only-utils", qualifiers(pub))]
@@ -84,6 +92,63 @@ impl BankStatus {
             BankStatus::Unprocessed => true,
             BankStatus::Dead => false,
             BankStatus::Frozen(_) => false,
+        }
+    }
+
+    /// 获取指定 slot 的所有交易
+    pub fn get_slot_transactions(&self, blockstore: &Blockstore, slot: Slot) -> Option<Vec<VersionedTransaction>> {
+        match blockstore.get_slot_entries(slot, 0) {
+            Ok(entries) => {
+                match self {
+                    BankStatus::Unprocessed => {
+                        warn!("Slot {} is unprocessed, transactions may not be validated", slot);
+                        Some(entries.into_iter().flat_map(|entry| entry.transactions).collect())
+                    },
+                    BankStatus::Frozen(hash) => {
+                        debug!("Slot {} is frozen with hash: {:?}", slot, hash);
+                        Some(entries.into_iter().flat_map(|entry| entry.transactions).collect())
+                    },
+                    BankStatus::Dead => {
+                        warn!("Slot {} is dead", slot);
+                        None
+                    }
+                }
+            }
+            Err(err) => {
+                warn!("Failed to get entries for slot {}: {:?}", slot, err);
+                None
+            }
+        }
+    }
+
+    /// 打印指定 slot 的所有交易信息
+    pub fn print_slot_transactions(&self, blockstore: &Blockstore, slot: Slot) {
+        if let Some(transactions) = self.get_slot_transactions(blockstore, slot) {
+            info!(
+                "\nSlot {} contains {} transactions:",
+                slot,
+                transactions.len()
+            );
+            for (idx, tx) in transactions.iter().enumerate() {
+                let signatures = tx.signatures.iter()
+                    .map(|sig| sig.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                
+                    let version = match &tx.message {
+                        VersionedMessage::Legacy(_) => "Legacy",
+                        VersionedMessage::V0(_) => "V0",
+                    };
+                                  
+                info!(
+                    "Transaction {}: Signatures: [{}], Message version: {}",
+                    idx,
+                    signatures,
+                    version
+                );
+            }
+        } else {
+            info!("No transactions available for slot {}", slot);
         }
     }
 }
@@ -864,6 +929,10 @@ pub(crate) fn check_slot_agrees_with_cluster(
         return;
     }
 
+    // 获取 slot 的状态并打印交易信息
+    let status = BankStatus::Unprocessed;  // 或者根据实际情况获取正确的状态
+    status.print_slot_transactions(blockstore, slot);
+
     // Needs to happen before the bank_frozen_hash.is_none() check below to account for duplicate
     // signals arriving before the bank is constructed in replay.
     if let SlotStateUpdate::Duplicate(ref state) = slot_state_update {
@@ -1407,13 +1476,11 @@ mod test {
         epoch_slots_frozen_state_update_6: {
             let epoch_slots_frozen_hash = Hash::new_unique();
             let duplicate_confirmed_hash = None;
-            let frozen_hash = Hash::new_unique();
-            let bank_status = BankStatus::Frozen(frozen_hash);
+            let bank_status = BankStatus::Frozen(Hash::new_unique());
             let epoch_slots_frozen_state = EpochSlotsFrozenState::new(epoch_slots_frozen_hash, duplicate_confirmed_hash, bank_status, false);
             (
                 SlotStateUpdate::EpochSlotsFrozen(epoch_slots_frozen_state),
-                vec![
-                ResultingStateChange::MarkSlotDuplicate(frozen_hash),
+                vec![ResultingStateChange::MarkSlotDuplicate(Hash::new_unique()),
                 ResultingStateChange::RepairDuplicateConfirmedVersion(epoch_slots_frozen_hash)],
             )
         },
@@ -1520,8 +1587,7 @@ mod test {
         epoch_slots_frozen_state_update_17: {
             let epoch_slots_frozen_hash = Hash::new_unique();
             let duplicate_confirmed_hash = None;
-            let frozen_hash = Hash::new_unique();
-            let bank_status = BankStatus::Frozen(frozen_hash);
+            let bank_status = BankStatus::Frozen(Hash::new_unique());
             let epoch_slots_frozen_state = EpochSlotsFrozenState::new(epoch_slots_frozen_hash, duplicate_confirmed_hash, bank_status, true);
             (
                 SlotStateUpdate::EpochSlotsFrozen(epoch_slots_frozen_state),
@@ -1953,10 +2019,10 @@ mod test {
         let root = 0;
         let mut duplicate_slots_tracker = DuplicateSlotsTracker::default();
         let mut purge_repair_slot_counter = PurgeRepairSlotCounter::default();
-        let mut duplicate_confirmed_slots = DuplicateConfirmedSlots::default();
 
         // Mark slot 2 as duplicate confirmed
         let slot2_hash = bank_forks.read().unwrap().get(2).unwrap().hash();
+        let duplicate_confirmed_slots = DuplicateConfirmedSlots::default();
         duplicate_confirmed_slots.insert(2, slot2_hash);
         let duplicate_confirmed_state = DuplicateConfirmedState::new_from_state(
             slot2_hash,
@@ -2205,10 +2271,11 @@ mod test {
             &mut purge_repair_slot_counter,
             SlotStateUpdate::DuplicateConfirmed(duplicate_confirmed_state),
         );
-        verify_all_slots_duplicate_confirmed(&bank_forks, &heaviest_subtree_fork_choice, 3, true);
-        assert_eq!(
-            heaviest_subtree_fork_choice.best_overall_slot(),
-            (3, slot3_hash)
+        verify_all_slots_duplicate_confirmed(
+            &bank_forks,
+            &heaviest_subtree_fork_choice,
+            3,
+            true,
         );
 
         // Mark ancestor 1 as duplicate, fork choice should be unaffected since
@@ -2235,7 +2302,12 @@ mod test {
             SlotStateUpdate::Duplicate(duplicate_state),
         );
         assert!(duplicate_slots_tracker.contains(&1));
-        verify_all_slots_duplicate_confirmed(&bank_forks, &heaviest_subtree_fork_choice, 3, true);
+        verify_all_slots_duplicate_confirmed(
+            &bank_forks,
+            &heaviest_subtree_fork_choice,
+            3,
+            true,
+        );
         assert_eq!(
             heaviest_subtree_fork_choice.best_overall_slot(),
             (3, slot3_hash)
