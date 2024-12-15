@@ -16,6 +16,7 @@ target/
 
 # log files
 *.log
+*.lock
 log-*.txt
 log-*/
 !log-collector/

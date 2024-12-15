@@ -52,7 +52,7 @@ impl PacketReceiver {
                     |packet| {
                         packet.check_insufficent_compute_unit_limit()?;
                         packet.check_excessive_precompiles()?;
-                        // info!("packet {:?}", packet);
+                        debug!("packet {:?}", packet);
                         Ok(packet)
                     },
                 )
