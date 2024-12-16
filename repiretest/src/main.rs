@@ -76,16 +76,24 @@ impl RepairClient {
         
         info!("Using public address: {}", public_socket_addr);
 
-        let mut node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
-        let mut info = node.info.clone();
-        
+        // let mut node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
         // Create socket addresses for each service
         let gossip_addr = SocketAddr::new(public_socket_addr.ip(), 8000);
         let tpu_addr = SocketAddr::new(public_socket_addr.ip(), 8001);
         let tpu_forwards_addr = SocketAddr::new(public_socket_addr.ip(), 8002);
         let tvu_addr = SocketAddr::new(public_socket_addr.ip(), 8003);
         let serve_repair_addr = SocketAddr::new(public_socket_addr.ip(), 8004);
+
+        let mut node = Node::new_single_bind(
+            &node_keypair.pubkey(),
+            &gossip_addr,
+            (8000, 10_000),
+            local_socket_addr.ip()
+        );
+
+        let mut info = node.info.clone();
         
+ 
         // Set the addresses
         let _ = info.set_gossip(gossip_addr);
         let _ = info.set_tpu(tpu_addr);
