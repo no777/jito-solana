@@ -1,0 +1,20 @@
+[package]
+name = "repiretest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+crossbeam-channel = "0.5"
+rand = "0.8"
+tempfile = "3.8"
+tokio = { version = "1.0", features = ["full"] }
+
+solana-core = { path = "../core" }
+solana-gossip = { path = "../gossip" }
+solana-ledger = { path = "../ledger" }
+solana-runtime = { path = "../runtime" }
+solana-sdk = { path = "../sdk" }
+solana-streamer = { path = "../streamer" }
+solana-accounts-db = { path = "../accounts-db" }
+solana-client = { path = "../client" }
