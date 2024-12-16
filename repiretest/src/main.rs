@@ -1,19 +1,34 @@
 use {
-    anyhow::{Context, Result, anyhow}, solana_accounts_db::{
-        accounts_db::AccountShrinkThreshold, accounts_index::AccountSecondaryIndexes
-    }, solana_core::repair::serve_repair::{ServeRepair, ShredRepairType}, solana_gossip::{
+    anyhow::{Context, Result, anyhow},
+    solana_accounts_db::{
+        accounts_db::AccountShrinkThreshold,
+        accounts_index::AccountSecondaryIndexes,
+    },
+    solana_core::repair::serve_repair::{ServeRepair, ShredRepairType},
+    solana_gossip::{
         cluster_info::{ClusterInfo, Node},
         contact_info::ContactInfo,
-    }, solana_ledger::{
+    },
+    solana_ledger::{
         blockstore::Blockstore,
         blockstore_options::{AccessType, BlockstoreOptions, LedgerColumnOptions, ShredStorageType},
-    }, solana_runtime::{
+    },
+    solana_runtime::{
         bank::Bank,
         bank_forks::BankForks,
-        genesis_utils::create_genesis_config,
-    }, solana_sdk::{
-        clock::Slot, packet::Packet, pubkey::Pubkey, signature::{Keypair, Signer}, timing::timestamp
-    }, solana_streamer::socket::SocketAddrSpace, std::{
+        genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
+    },
+    solana_sdk::{
+        clock::{Clock, Slot},
+        packet::Packet,
+        pubkey::Pubkey,
+        signature::{Keypair, Signer},
+        timing::timestamp,
+        native_token::LAMPORTS_PER_SOL,
+        vote::state::{VoteInit, VoteState},
+    },
+    solana_streamer::socket::SocketAddrSpace,
+    std::{
         collections::HashSet,
         env,
         fs,
@@ -21,7 +36,7 @@ use {
         path::{Path, PathBuf},
         sync::{atomic::AtomicBool, Arc, RwLock},
         time::Duration,
-    }
+    },
 };
 
 struct RepairClient {
@@ -34,11 +49,11 @@ struct RepairClient {
 impl RepairClient {
     pub fn new(ledger_path: &Path, local_addr: &str) -> Result<Self> {
         // Initialize node and cluster info
-        let node_keypair = Keypair::new();
+        let node_keypair = Arc::new(Keypair::new());
         let node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
         let cluster_info = Arc::new(ClusterInfo::new(
             node.info.clone(),
-            Arc::new(node_keypair),
+            node_keypair.clone(),
             SocketAddrSpace::Unspecified,
         ));
 
@@ -57,7 +72,7 @@ impl RepairClient {
                 BlockstoreOptions {
                     access_type: AccessType::Primary,
                     recovery_mode: None,
-                    enforce_ulimit_nofile: false, // Disable file descriptor limit check
+                    enforce_ulimit_nofile: false,
                     column_options: LedgerColumnOptions {
                         shred_storage_type: ShredStorageType::RocksLevel,
                         ..LedgerColumnOptions::default()
@@ -67,8 +82,25 @@ impl RepairClient {
             .context("Failed to open blockstore")?,
         );
 
-        // Create genesis config and bank
-        let genesis_config = create_genesis_config(10_000).genesis_config;
+        // Create validator vote keypairs
+        let validator_keypair = Keypair::new();
+        let vote_keypair = Keypair::new();
+        let validator_stake = 42 * LAMPORTS_PER_SOL;
+        let validator_lamports = 42 * LAMPORTS_PER_SOL;
+
+        // Create genesis config with the validator as leader
+        let GenesisConfigInfo {
+            genesis_config,
+            mint_keypair: _,
+            voting_keypair: _,
+            validator_pubkey: _,
+        } = create_genesis_config_with_leader(
+            validator_lamports,
+            &validator_keypair.pubkey(),
+            validator_stake,
+        );
+
+        // Create bank with the genesis config
         let bank = Bank::new_with_paths(
             &genesis_config,
             Arc::new(Default::default()),
@@ -84,6 +116,18 @@ impl RepairClient {
             Arc::new(AtomicBool::new(false)),
             None,
         );
+
+        // Initialize vote account
+        let vote_init = VoteInit {
+            node_pubkey: validator_keypair.pubkey(),
+            authorized_voter: validator_keypair.pubkey(),
+            authorized_withdrawer: validator_keypair.pubkey(),
+            commission: 0,
+        };
+
+        let clock = Clock::default();
+        let _vote_state = VoteState::new(&vote_init, &clock);
+
         let bank_forks = BankForks::new_rw_arc(bank);
 
         // Initialize serve repair with required HashSet
@@ -111,7 +155,7 @@ impl RepairClient {
         println!("Requesting repair for slot {} shred {}", slot, shred_index);
 
         // Create repair request
-        let repair_request = ShredRepairType::Shred(slot, shred_index);
+        let _repair_request = ShredRepairType::Shred(slot, shred_index);
         
         // Create a dummy contact info for the repair peer
         let mut repair_peer_info = ContactInfo::new_localhost(&self.cluster_info.id(), timestamp());
@@ -119,7 +163,7 @@ impl RepairClient {
 
         // Create repair request packet
         let mut packet = Packet::default();
-        packet.meta_mut().size = 1024; // Set a reasonable size
+        packet.meta_mut().size = 1024;
 
         // Send repair request
         self.repair_socket
