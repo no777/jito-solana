@@ -16,8 +16,9 @@ use {
     }, solana_streamer::socket::SocketAddrSpace, std::{
         collections::HashSet,
         env,
+        fs,
         net::{SocketAddr, UdpSocket},
-        path::Path,
+        path::{Path, PathBuf},
         sync::{atomic::AtomicBool, Arc, RwLock},
         time::Duration,
     }
@@ -31,7 +32,7 @@ struct RepairClient {
 }
 
 impl RepairClient {
-    pub fn new(ledger_path: &Path) -> Result<Self> {
+    pub fn new(ledger_path: &Path, local_addr: &str) -> Result<Self> {
         // Initialize node and cluster info
         let node_keypair = Keypair::new();
         let node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
@@ -41,8 +42,10 @@ impl RepairClient {
             SocketAddrSpace::Unspecified,
         ));
 
-        // Initialize repair socket
-        let repair_socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind repair socket")?;
+        // Initialize repair socket with provided local address
+        let bind_addr = format!("{}:0", local_addr);
+        println!("Binding repair socket to {}", bind_addr);
+        let repair_socket = UdpSocket::bind(&bind_addr).context("Failed to bind repair socket")?;
         repair_socket
             .set_read_timeout(Some(Duration::from_secs(5)))
             .context("Failed to set socket timeout")?;
@@ -140,21 +143,33 @@ impl RepairClient {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Get IP address from command line arguments
+    // Get command line arguments
     let args: Vec<String> = env::args().collect();
-    let ip_address = args.get(1)
-        .ok_or_else(|| anyhow!("Please provide an IP address as the first argument"))?;
-
-    // Create a temporary directory for blockstore
-    let ledger_path = tempfile::tempdir().context("Failed to create temp dir")?;
     
-    // Initialize repair client
-    let repair_client = RepairClient::new(ledger_path.path())?;
+    // First argument is the target IP to send requests to
+    let target_ip = args.get(1)
+        .ok_or_else(|| anyhow!("Please provide a target IP address as the first argument"))?;
+    
+    // Second argument is the local IP to bind to (optional, defaults to "0.0.0.0")
+    let local_ip = args.get(2).map(|s| s.as_str()).unwrap_or("0.0.0.0");
 
-    // Example repair request
-    // Note: In a real scenario, you would get these values from your network
+    // Third argument is the ledger path (optional, defaults to "./ledger")
+    let ledger_path = args.get(3).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./test-ledger"));
+
+    println!("Using local IP: {}, target IP: {}, ledger path: {}", 
+             local_ip, target_ip, ledger_path.display());
+
+    // Create ledger directory if it doesn't exist
+    if !ledger_path.exists() {
+        fs::create_dir_all(&ledger_path).context("Failed to create ledger directory")?;
+    }
+    
+    // Initialize repair client with local IP and ledger path
+    let repair_client = RepairClient::new(&ledger_path, local_ip)?;
+
+    // Send repair requests to target IP
     for i in 8001..8010 {
-        let repair_peer_addr = format!("{}:{}", ip_address, i).parse().unwrap(); 
+        let repair_peer_addr = format!("{}:{}", target_ip, i).parse().unwrap(); 
         let slot = 100;
         let shred_index = 0;
 
