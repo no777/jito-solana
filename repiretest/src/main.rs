@@ -1,52 +1,54 @@
-use {
-    anyhow::{Context, Result, anyhow},
-    solana_core::repair::{
-        serve_repair::{ServeRepair, ShredRepairType, RepairProtocol, RepairRequestHeader},
-        repair_service::{RepairService, RepairInfo, OutstandingShredRepairs},
-    },
-    solana_core::cluster_slots_service::cluster_slots::ClusterSlots,
-    solana_gossip::{
-        cluster_info::{ClusterInfo, Node},
-        contact_info::ContactInfo,
-    },
-    solana_ledger::{
-        blockstore::Blockstore,
-        blockstore_options::{AccessType, BlockstoreOptions, LedgerColumnOptions},
-        shred::Shred,
-        genesis_utils::create_genesis_config,
-    },
-    solana_runtime::{
-        bank::Bank,
-        bank_forks::BankForks,
-        genesis_utils::GenesisConfigInfo,
-    },
-    solana_sdk::{
-        clock::Slot,
-        pubkey::Pubkey,
-        signature::{Keypair, Signer},
-        timing::timestamp,
-        native_token::LAMPORTS_PER_SOL,
-        epoch_schedule::EpochSchedule,
-    },
-    solana_streamer::socket::SocketAddrSpace,
-    std::{
-        collections::HashSet,
-        env,
-        fs,
-        net::{SocketAddr, UdpSocket, IpAddr, ToSocketAddrs},
-        path::{Path, PathBuf},
-        sync::{Arc, RwLock, atomic::AtomicBool},
-        time::Duration,
-        str::FromStr,
-    },
-    crossbeam_channel::unbounded,
-    tokio::sync::mpsc,
-    solana_accounts_db::{accounts_index::AccountSecondaryIndexes, accounts_db::AccountShrinkThreshold},
+use std::{
+    collections::HashSet,
+    env,
+    fs,
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket, ToSocketAddrs},
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::{Arc, RwLock, atomic::AtomicBool},
+    time::Duration,
 };
+
+use anyhow::{anyhow, Context, Result};
+use log::*;
+use solana_gossip::{
+    cluster_info::{ClusterInfo, Node},
+    contact_info::ContactInfo,
+};
+use solana_core::{
+    repair::{
+        repair_service::{RepairService, RepairInfo, OutstandingShredRepairs},
+        serve_repair::{ServeRepair, ShredRepairType, RepairProtocol, RepairRequestHeader},
+    },
+    cluster_slots_service::cluster_slots::ClusterSlots,
+};
+use solana_ledger::{
+    blockstore::Blockstore,
+    blockstore_options::{AccessType, BlockstoreOptions, LedgerColumnOptions},
+    shred::Shred,
+    genesis_utils::create_genesis_config,
+};
+use solana_runtime::{
+    bank::Bank,
+    bank_forks::BankForks,
+    genesis_utils::GenesisConfigInfo,
+};
+use solana_sdk::{
+    clock::Slot,
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
+    timing::timestamp,
+    native_token::LAMPORTS_PER_SOL,
+    epoch_schedule::EpochSchedule,
+};
+use solana_streamer::socket::SocketAddrSpace;
+use crossbeam_channel::unbounded;
+use tokio::sync::mpsc;
+use solana_accounts_db::{accounts_index::AccountSecondaryIndexes, accounts_db::AccountShrinkThreshold};
 
 struct RepairClient {
     cluster_info: Arc<ClusterInfo>,
-    repair_socket: UdpSocket,
+    repair_socket: Arc<UdpSocket>,
     blockstore: Arc<Blockstore>,
     serve_repair: ServeRepair,
     cluster_slots: Arc<ClusterSlots>,
@@ -60,32 +62,38 @@ impl RepairClient {
         let node_keypair = Arc::new(Keypair::new());
         
         // If public_addr is provided, use it for the node's contact info
-        let node = if let Some(public_ip) = public_addr {
-            let mut node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
-            let mut info = node.info.clone();
-            
-            // Parse the IP address once
-            let ip = IpAddr::from_str(public_ip).context("Failed to parse public IP")?;
-            
-            // Create socket addresses for each service
-            let gossip_addr = SocketAddr::new(ip, 8000);
-            let tpu_addr = SocketAddr::new(ip, 8001);
-            let tpu_forwards_addr = SocketAddr::new(ip, 8002);
-            let tvu_addr = SocketAddr::new(ip, 8003);
-            let serve_repair_addr = SocketAddr::new(ip, 8004);
-            
-            // Set the addresses
-            let _ = info.set_gossip(gossip_addr);
-            let _ = info.set_tpu(tpu_addr);
-            let _ = info.set_tpu_forwards(tpu_forwards_addr);
-            let _ = info.set_tvu(tvu_addr);
-            let _ = info.set_serve_repair(serve_repair_addr);
-            
-            node.info = info;
-            node
+        let local_socket_addr = SocketAddr::from_str(local_addr).context("Failed to parse local address")?;
+        
+        // 如果没有提供public_addr，则使用get_public_ip获取
+        let public_socket_addr = if let Some(addr) = public_addr {
+            let ip = IpAddr::from_str(addr).context("Failed to parse public address")?;
+            SocketAddr::new(ip, local_socket_addr.port())
         } else {
-            Node::new_localhost_with_pubkey(&node_keypair.pubkey())
+            info!("No public address provided, attempting to get public IP...");
+            let public_ip = get_public_ip().context("Failed to get public IP")?;
+            SocketAddr::new(public_ip, local_socket_addr.port())
         };
+        
+        info!("Using public address: {}", public_socket_addr);
+
+        let mut node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
+        let mut info = node.info.clone();
+        
+        // Create socket addresses for each service
+        let gossip_addr = SocketAddr::new(public_socket_addr.ip(), 8000);
+        let tpu_addr = SocketAddr::new(public_socket_addr.ip(), 8001);
+        let tpu_forwards_addr = SocketAddr::new(public_socket_addr.ip(), 8002);
+        let tvu_addr = SocketAddr::new(public_socket_addr.ip(), 8003);
+        let serve_repair_addr = SocketAddr::new(public_socket_addr.ip(), 8004);
+        
+        // Set the addresses
+        let _ = info.set_gossip(gossip_addr);
+        let _ = info.set_tpu(tpu_addr);
+        let _ = info.set_tpu_forwards(tpu_forwards_addr);
+        let _ = info.set_tvu(tvu_addr);
+        let _ = info.set_serve_repair(serve_repair_addr);
+        
+        node.info = info;
 
         let cluster_info = Arc::new(ClusterInfo::new(
             node.info.clone(),
@@ -127,9 +135,8 @@ impl RepairClient {
         );
 
         // Create repair socket
-        let repair_socket = UdpSocket::bind(format!("{}:0", local_addr))
-            .context("Failed to bind repair socket")?;
-        println!("Binding repair socket to {}:0", local_addr);
+        let repair_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").context("Failed to bind repair socket")?);
+        repair_socket.as_ref().set_read_timeout(Some(Duration::from_secs(5)))?;
 
         // Create genesis config and bank
         let validator_keypair = Keypair::new();
@@ -209,7 +216,7 @@ impl RepairClient {
 
         Ok(RepairClient {
             cluster_info,
-            repair_socket: repair_socket.as_ref().try_clone().unwrap(),
+            repair_socket,
             blockstore,
             serve_repair,
             cluster_slots: Arc::new(ClusterSlots::default()),
@@ -248,9 +255,6 @@ impl RepairClient {
             .send_to(&request_bytes, repair_peer_addr)
             .context("Failed to send repair request")?;
 
-        // 设置接收超时
-        self.repair_socket.set_read_timeout(Some(Duration::from_secs(5)))?;
-
         // 接收响应
         let mut buffer = [0u8; 65536];  // 64KB buffer
         match self.repair_socket.recv_from(&mut buffer) {
@@ -284,65 +288,86 @@ impl RepairClient {
     }
 }
 
+
+/// Returns public-facing IPV4 address
+pub fn get_public_ip() -> reqwest::Result<IpAddr> {
+    info!("Requesting public ip from ifconfig.me...");
+    let client = reqwest::blocking::Client::builder()
+        .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+        .build()?;
+    let response = client.get("https://ifconfig.me").send()?.text()?;
+    let public_ip = IpAddr::from_str(&response).unwrap();
+    info!("Retrieved public ip: {public_ip:?}");
+
+    Ok(public_ip)
+}
+
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logger
+    env_logger::init();
+    
     // Get command line arguments
     let args: Vec<String> = env::args().collect();
     let mut target_ip = None;
     let mut public_ip = None;
-    let mut slot = 100u64;  // default slot
+    let mut slot = None;
+
     let mut i = 1;
-    
     while i < args.len() {
         match args[i].as_str() {
             "--slot" => {
-                if i + 1 < args.len() {
-                    slot = args[i + 1].parse().context("Failed to parse slot number")?;
-                    i += 2;
+                i += 1;
+                if i < args.len() {
+                    slot = Some(args[i].parse::<u64>().context("Failed to parse slot")?);
                 } else {
                     return Err(anyhow!("--slot requires a value"));
                 }
             }
             arg => {
                 if target_ip.is_none() {
-                    target_ip = Some(arg);
+                    target_ip = Some(arg.to_string());
                 } else if public_ip.is_none() {
-                    public_ip = Some(arg);
+                    public_ip = Some(arg.to_string());
                 }
-                i += 1;
             }
         }
+        i += 1;
     }
 
     let target_ip = target_ip.ok_or_else(|| anyhow!("Please provide a target IP address"))?;
-    
-    // Always bind to localhost
-    let local_ip = "0.0.0.0";
+    let slot = slot.ok_or_else(|| anyhow!("Please provide a slot number with --slot"))?;
 
-    // Use default ledger path
+    // Create temporary ledger directory
     let ledger_path = PathBuf::from("./test-ledger");
+    fs::create_dir_all(&ledger_path).context("Failed to create ledger directory")?;
 
-    println!("Using local IP: {}, public IP: {}, target IP: {}, slot: {}, ledger path: {}", 
-             local_ip, 
-             public_ip.unwrap_or("none"), 
-             target_ip, 
-             slot,
-             ledger_path.display());
+    // 构建本地地址
+    let local_addr = format!("0.0.0.0:8000");
 
-    // Create ledger directory if it doesn't exist
-    if !ledger_path.exists() {
-        fs::create_dir_all(&ledger_path).context("Failed to create ledger directory")?;
-    }
-    
-    // Initialize repair client with local IP and ledger path
-    let repair_client = RepairClient::new(&ledger_path, local_ip, public_ip)?;
+    println!(
+        "Using local IP: {}, public IP: {}, target IP: {}, slot: {}, ledger path: {}",
+        "0.0.0.0",
+        public_ip.as_ref().map(|s| s.as_str()).unwrap_or("auto"),
+        target_ip,
+        slot,
+        ledger_path.display()
+    );
+
+    // Initialize repair client
+    let repair_client = RepairClient::new(
+        &ledger_path,
+        &local_addr,
+        public_ip.as_deref(),
+    )?;
 
     // Wait for repair service to initialize
     std::thread::sleep(std::time::Duration::from_secs(1));
 
     // Send repair requests to target IP
     for port in 8008..8010 {
-        let repair_peer_addr = SocketAddr::new(IpAddr::from_str(target_ip).context("Failed to parse target IP")?, port);
+        let repair_peer_addr = SocketAddr::new(IpAddr::from_str(&target_ip).context("Failed to parse target IP")?, port);
         let shred_index = 0;
         repair_client.request_repair(repair_peer_addr, slot, shred_index)?;
     }
