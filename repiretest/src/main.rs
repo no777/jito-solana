@@ -227,22 +227,46 @@ impl RepairClient {
 async fn main() -> Result<()> {
     // Get command line arguments
     let args: Vec<String> = env::args().collect();
+    let mut target_ip = None;
+    let mut public_ip = None;
+    let mut slot = 100u64;  // default slot
+    let mut i = 1;
     
-    // First argument is the target IP to send requests to
-    let target_ip = args.get(1)
-        .ok_or_else(|| anyhow!("Please provide a target IP address as the first argument"))?;
-    
-    // Second argument is the public IP (optional)
-    let public_ip = args.get(2).map(|s| s.as_str());
+    while i < args.len() {
+        match args[i].as_str() {
+            "--slot" => {
+                if i + 1 < args.len() {
+                    slot = args[i + 1].parse().context("Failed to parse slot number")?;
+                    i += 2;
+                } else {
+                    return Err(anyhow!("--slot requires a value"));
+                }
+            }
+            arg => {
+                if target_ip.is_none() {
+                    target_ip = Some(arg);
+                } else if public_ip.is_none() {
+                    public_ip = Some(arg);
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let target_ip = target_ip.ok_or_else(|| anyhow!("Please provide a target IP address"))?;
     
     // Always bind to localhost
     let local_ip = "0.0.0.0";
 
-    // Third argument is the ledger path (optional, defaults to "./test-ledger")
-    let ledger_path = args.get(3).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./test-ledger"));
+    // Use default ledger path
+    let ledger_path = PathBuf::from("./test-ledger");
 
-    println!("Using local IP: {}, public IP: {}, target IP: {}, ledger path: {}", 
-             local_ip, public_ip.unwrap_or("none"), target_ip, ledger_path.display());
+    println!("Using local IP: {}, public IP: {}, target IP: {}, slot: {}, ledger path: {}", 
+             local_ip, 
+             public_ip.unwrap_or("none"), 
+             target_ip, 
+             slot,
+             ledger_path.display());
 
     // Create ledger directory if it doesn't exist
     if !ledger_path.exists() {
@@ -253,10 +277,8 @@ async fn main() -> Result<()> {
     let repair_client = RepairClient::new(&ledger_path, local_ip, public_ip)?;
 
     // Send repair requests to target IP
-    for i in 8001..8010 {
-        let repair_peer_addr = SocketAddr::new(IpAddr::from_str(target_ip).context("Failed to parse target IP")?, i);
-        
-        let slot = 307798183;
+    for port in 8001..8010 {
+        let repair_peer_addr = SocketAddr::new(IpAddr::from_str(target_ip).context("Failed to parse target IP")?, port);
         let shred_index = 0;
 
         println!("Attempting repair request to {}", repair_peer_addr);
