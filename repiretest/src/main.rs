@@ -1,5 +1,5 @@
 use {
-    anyhow::{Context, Result}, core::fmt, solana_accounts_db::{
+    anyhow::{Context, Result, anyhow}, solana_accounts_db::{
         accounts_db::AccountShrinkThreshold, accounts_index::AccountSecondaryIndexes
     }, solana_core::repair::serve_repair::{ServeRepair, ShredRepairType}, solana_gossip::{
         cluster_info::{ClusterInfo, Node},
@@ -15,6 +15,7 @@ use {
         clock::Slot, packet::Packet, pubkey::Pubkey, signature::{Keypair, Signer}, timing::timestamp
     }, solana_streamer::socket::SocketAddrSpace, std::{
         collections::HashSet,
+        env,
         net::{SocketAddr, UdpSocket},
         path::Path,
         sync::{atomic::AtomicBool, Arc, RwLock},
@@ -41,7 +42,7 @@ impl RepairClient {
         ));
 
         // Initialize repair socket
-        let repair_socket = UdpSocket::bind("24.64.100.231:0").context("Failed to bind repair socket")?;
+        let repair_socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind repair socket")?;
         repair_socket
             .set_read_timeout(Some(Duration::from_secs(5)))
             .context("Failed to set socket timeout")?;
@@ -139,6 +140,11 @@ impl RepairClient {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Get IP address from command line arguments
+    let args: Vec<String> = env::args().collect();
+    let ip_address = args.get(1)
+        .ok_or_else(|| anyhow!("Please provide an IP address as the first argument"))?;
+
     // Create a temporary directory for blockstore
     let ledger_path = tempfile::tempdir().context("Failed to create temp dir")?;
     
@@ -148,7 +154,7 @@ async fn main() -> Result<()> {
     // Example repair request
     // Note: In a real scenario, you would get these values from your network
     for i in 8001..8010 {
-        let repair_peer_addr = format!("{}:{}", "72.46.86.235", i).parse().unwrap(); 
+        let repair_peer_addr = format!("{}:{}", ip_address, i).parse().unwrap(); 
         let slot = 100;
         let shred_index = 0;
 
