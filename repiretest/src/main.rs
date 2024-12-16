@@ -217,7 +217,7 @@ async fn main() -> Result<()> {
     // Send repair requests to target IP
     for i in 8001..8010 {
         let repair_peer_addr = format!("{}:{}", target_ip, i).parse().unwrap(); 
-        let slot = 100;
+        let slot = 307798183;
         let shred_index = 0;
 
         println!("Attempting repair request to {}", repair_peer_addr);
