@@ -2,7 +2,7 @@ use {
     anyhow::{Context, Result, anyhow},
     solana_core::repair::{
         serve_repair::{ServeRepair, ShredRepairType, RepairProtocol, RepairRequestHeader},
-        repair_service::RepairStats,
+        repair_service::{RepairService, RepairInfo, OutstandingShredRepairs},
     },
     solana_core::cluster_slots_service::cluster_slots::ClusterSlots,
     solana_gossip::{
@@ -26,18 +26,22 @@ use {
         signature::{Keypair, Signer},
         timing::timestamp,
         native_token::LAMPORTS_PER_SOL,
+        epoch_schedule::EpochSchedule,
     },
     solana_streamer::socket::SocketAddrSpace,
     std::{
         collections::HashSet,
         env,
         fs,
-        net::{SocketAddr, UdpSocket, IpAddr},
+        net::{SocketAddr, UdpSocket, IpAddr, ToSocketAddrs},
         path::{Path, PathBuf},
-        sync::{Arc, RwLock},
+        sync::{Arc, RwLock, atomic::AtomicBool},
         time::Duration,
         str::FromStr,
     },
+    crossbeam_channel::unbounded,
+    tokio::sync::mpsc,
+    solana_accounts_db::{accounts_index::AccountSecondaryIndexes, accounts_db::AccountShrinkThreshold},
 };
 
 struct RepairClient {
@@ -47,6 +51,7 @@ struct RepairClient {
     serve_repair: ServeRepair,
     cluster_slots: Arc<ClusterSlots>,
     bank_forks: Arc<RwLock<BankForks>>,
+    repair_service: Option<RepairService>,
 }
 
 impl RepairClient {
@@ -88,6 +93,25 @@ impl RepairClient {
             SocketAddrSpace::Unspecified,
         ));
 
+        // Add mainnet entrypoints
+        let entrypoints = vec![
+            ContactInfo::new_gossip_entry_point(&format!("{}:8001", 
+                (format!("{}:8001", "entrypoint2.mainnet-beta.solana.com")).to_socket_addrs()
+                    .expect("failed to resolve DNS")
+                    .next()
+                    .expect("no addresses found")
+                    .ip()
+            ).parse().expect("failed to parse entrypoint address")),
+            ContactInfo::new_gossip_entry_point(&format!("{}:8001",
+                (format!("{}:8001", "entrypoint3.mainnet-beta.solana.com")).to_socket_addrs()
+                    .expect("failed to resolve DNS")
+                    .next()
+                    .expect("no addresses found")
+                    .ip()
+            ).parse().expect("failed to parse entrypoint address")),
+        ];
+        cluster_info.set_entrypoints(entrypoints);
+
         // Create blockstore
         let blockstore = Arc::new(
             Blockstore::open_with_options(
@@ -124,8 +148,8 @@ impl RepairClient {
             Vec::new(),
             None,
             None,
-            solana_accounts_db::accounts_index::AccountSecondaryIndexes::default(),
-            solana_accounts_db::accounts_db::AccountShrinkThreshold::default(),
+            AccountSecondaryIndexes::default(),
+            AccountShrinkThreshold::default(),
             false,
             None,
             None,
@@ -135,23 +159,62 @@ impl RepairClient {
         );
 
         let bank_forks = BankForks::new_rw_arc(bank);
-        
-        
+
         // Initialize serve repair
         let repair_whitelist = Arc::new(RwLock::new(HashSet::<Pubkey>::default()));
         let serve_repair = ServeRepair::new(
             cluster_info.clone(),
             bank_forks.clone(),
-            repair_whitelist,
+            repair_whitelist.clone(),
+        );
+
+        // Initialize repair service
+        let exit = Arc::new(AtomicBool::new(false));
+        let repair_socket = Arc::new(repair_socket.try_clone().unwrap());
+        let ancestor_hashes_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").unwrap());
+        let (quic_endpoint_sender, _) = mpsc::channel(1024);
+        let (quic_endpoint_response_sender, _) = unbounded();
+        let (_verified_vote_sender, verified_vote_receiver) = unbounded();
+        let (_ancestor_hashes_replay_update_sender, ancestor_hashes_replay_update_receiver) = unbounded();
+        let (_dumped_slots_sender, dumped_slots_receiver) = unbounded();
+        let (popular_pruned_forks_sender, _) = unbounded();
+        let (ancestor_duplicate_slots_sender, _) = unbounded();
+        let outstanding_requests = Arc::new(RwLock::new(OutstandingShredRepairs::default()));
+
+        let repair_info = RepairInfo {
+            bank_forks: bank_forks.clone(),
+            cluster_info: cluster_info.clone(),
+            cluster_slots: Arc::new(ClusterSlots::default()),
+            epoch_schedule: EpochSchedule::default(),
+            repair_validators: None,
+            repair_whitelist: repair_whitelist.clone(),
+            ancestor_duplicate_slots_sender,
+            wen_restart_repair_slots: None,
+        };
+
+        let repair_service = RepairService::new(
+            blockstore.clone(),
+            exit,
+            repair_socket.clone(),
+            ancestor_hashes_socket,
+            quic_endpoint_sender,
+            quic_endpoint_response_sender,
+            repair_info,
+            verified_vote_receiver,
+            outstanding_requests.clone(),
+            ancestor_hashes_replay_update_receiver,
+            dumped_slots_receiver,
+            popular_pruned_forks_sender,
         );
 
         Ok(RepairClient {
             cluster_info,
-            repair_socket,
+            repair_socket: repair_socket.as_ref().try_clone().unwrap(),
             blockstore,
             serve_repair,
             cluster_slots: Arc::new(ClusterSlots::default()),
             bank_forks,
+            repair_service: Some(repair_service),
         })
     }
 
@@ -216,6 +279,7 @@ impl RepairClient {
                 println!("No response received: {}", e);
             }
         }
+
         Ok(())
     }
 }
@@ -273,16 +337,20 @@ async fn main() -> Result<()> {
     // Initialize repair client with local IP and ledger path
     let repair_client = RepairClient::new(&ledger_path, local_ip, public_ip)?;
 
+    // Wait for repair service to initialize
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
     // Send repair requests to target IP
-    for port in 8001..8010 {
+    for port in 8008..8010 {
         let repair_peer_addr = SocketAddr::new(IpAddr::from_str(target_ip).context("Failed to parse target IP")?, port);
         let shred_index = 0;
-
-        println!("Attempting repair request to {}", repair_peer_addr);
-        // Send repair request and handle response
-        if let Err(e) = repair_client.request_repair(repair_peer_addr, slot, shred_index) {
-            println!("Failed to repair from {}: {}", repair_peer_addr, e);
-        }
+        repair_client.request_repair(repair_peer_addr, slot, shred_index)?;
     }
+
+    // Join repair service
+    if let Some(repair_service) = repair_client.repair_service {
+        repair_service.join().unwrap();
+    }
+
     Ok(())
 }
