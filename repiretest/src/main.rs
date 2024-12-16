@@ -1,31 +1,31 @@
 use {
     anyhow::{Context, Result, anyhow},
-    solana_accounts_db::{
-        accounts_db::AccountShrinkThreshold,
-        accounts_index::AccountSecondaryIndexes,
+    solana_core::repair::{
+        serve_repair::{ServeRepair, ShredRepairType, RepairProtocol, RepairRequestHeader},
+        repair_service::RepairStats,
     },
-    solana_core::repair::serve_repair::{ServeRepair, ShredRepairType},
+    solana_core::cluster_slots_service::cluster_slots::ClusterSlots,
     solana_gossip::{
         cluster_info::{ClusterInfo, Node},
         contact_info::ContactInfo,
     },
     solana_ledger::{
         blockstore::Blockstore,
-        blockstore_options::{AccessType, BlockstoreOptions, LedgerColumnOptions, ShredStorageType},
+        blockstore_options::{AccessType, BlockstoreOptions, LedgerColumnOptions},
+        shred::Shred,
+        genesis_utils::create_genesis_config,
     },
     solana_runtime::{
         bank::Bank,
         bank_forks::BankForks,
-        genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
+        genesis_utils::GenesisConfigInfo,
     },
     solana_sdk::{
-        clock::{Clock, Slot},
-        packet::Packet,
+        clock::Slot,
         pubkey::Pubkey,
         signature::{Keypair, Signer},
         timing::timestamp,
         native_token::LAMPORTS_PER_SOL,
-        vote::state::{VoteInit, VoteState},
     },
     solana_streamer::socket::SocketAddrSpace,
     std::{
@@ -34,7 +34,7 @@ use {
         fs,
         net::{SocketAddr, UdpSocket, IpAddr},
         path::{Path, PathBuf},
-        sync::{atomic::AtomicBool, Arc, RwLock},
+        sync::{Arc, RwLock},
         time::Duration,
         str::FromStr,
     },
@@ -45,6 +45,8 @@ struct RepairClient {
     repair_socket: UdpSocket,
     blockstore: Arc<Blockstore>,
     serve_repair: ServeRepair,
+    cluster_slots: Arc<ClusterSlots>,
+    bank_forks: Arc<RwLock<BankForks>>,
 }
 
 impl RepairClient {
@@ -86,15 +88,7 @@ impl RepairClient {
             SocketAddrSpace::Unspecified,
         ));
 
-        // Always bind to local address for the socket
-        let bind_addr = format!("{}:0", local_addr);
-        println!("Binding repair socket to {}", bind_addr);
-        let repair_socket = UdpSocket::bind(&bind_addr).context("Failed to bind repair socket")?;
-        repair_socket
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .context("Failed to set socket timeout")?;
-
-        // Initialize blockstore with modified options
+        // Create blockstore
         let blockstore = Arc::new(
             Blockstore::open_with_options(
                 ledger_path,
@@ -102,123 +96,126 @@ impl RepairClient {
                     access_type: AccessType::Primary,
                     recovery_mode: None,
                     enforce_ulimit_nofile: false,
-                    column_options: LedgerColumnOptions {
-                        shred_storage_type: ShredStorageType::RocksLevel,
-                        ..LedgerColumnOptions::default()
-                    },
+                    column_options: LedgerColumnOptions::default(),
                 },
             )
             .context("Failed to open blockstore")?,
         );
 
-        // Create validator vote keypairs
+        // Create repair socket
+        let repair_socket = UdpSocket::bind(format!("{}:0", local_addr))
+            .context("Failed to bind repair socket")?;
+        println!("Binding repair socket to {}:0", local_addr);
+
+        // Create genesis config and bank
         let validator_keypair = Keypair::new();
-        let vote_keypair = Keypair::new();
-        let validator_stake = 42 * LAMPORTS_PER_SOL;
         let validator_lamports = 42 * LAMPORTS_PER_SOL;
 
-        // Create genesis config with the validator as leader
         let GenesisConfigInfo {
             genesis_config,
             mint_keypair: _,
             voting_keypair: _,
             validator_pubkey: _,
-        } = create_genesis_config_with_leader(
-            validator_lamports,
-            &validator_keypair.pubkey(),
-            validator_stake,
-        );
+        } = create_genesis_config(validator_lamports);
 
-        // Create bank with the genesis config
         let bank = Bank::new_with_paths(
             &genesis_config,
-            Arc::new(Default::default()),
-            vec![],
+            Arc::new(solana_runtime::runtime_config::RuntimeConfig::default()),
+            Vec::new(),
             None,
             None,
-            AccountSecondaryIndexes::default(),
-            AccountShrinkThreshold::default(),
+            solana_accounts_db::accounts_index::AccountSecondaryIndexes::default(),
+            solana_accounts_db::accounts_db::AccountShrinkThreshold::default(),
             false,
             None,
             None,
             None,
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
             None,
         );
 
-        // Initialize vote account
-        let vote_init = VoteInit {
-            node_pubkey: validator_keypair.pubkey(),
-            authorized_voter: validator_keypair.pubkey(),
-            authorized_withdrawer: validator_keypair.pubkey(),
-            commission: 0,
-        };
-
-        let clock = Clock::default();
-        let _vote_state = VoteState::new(&vote_init, &clock);
-
         let bank_forks = BankForks::new_rw_arc(bank);
-
-        // Initialize serve repair with required HashSet
+        
+        
+        // Initialize serve repair
         let repair_whitelist = Arc::new(RwLock::new(HashSet::<Pubkey>::default()));
         let serve_repair = ServeRepair::new(
             cluster_info.clone(),
-            bank_forks,
+            bank_forks.clone(),
             repair_whitelist,
         );
 
-        Ok(Self {
+        Ok(RepairClient {
             cluster_info,
             repair_socket,
             blockstore,
             serve_repair,
+            cluster_slots: Arc::new(ClusterSlots::default()),
+            bank_forks,
         })
     }
 
-    pub fn request_repair(
-        &self,
-        repair_peer_addr: SocketAddr,
-        slot: Slot,
-        shred_index: u64,
-    ) -> Result<()> {
+    pub fn request_repair(&self, repair_peer_addr: SocketAddr, slot: Slot, shred_index: u64) -> Result<()> {
+        let mut repair_peer_info = ContactInfo::new_localhost(&Pubkey::new_unique(), timestamp());
+        let _ = repair_peer_info.set_gossip(repair_peer_addr);
+        let _ = repair_peer_info.set_tvu(repair_peer_addr);
+
+        let repair_request = ShredRepairType::Shred(slot, shred_index);
         println!("Requesting repair for slot {} shred {}", slot, shred_index);
 
-        // Create repair request
-        let _repair_request = ShredRepairType::Shred(slot, shred_index);
-        
-        // Create a dummy contact info for the repair peer
-        let mut repair_peer_info = ContactInfo::new_localhost(&self.cluster_info.id(), timestamp());
-        repair_peer_info.set_gossip(repair_peer_addr);
+        // 创建修复请求
+        let nonce = timestamp() as u32;
+        let keypair = Keypair::new();
+        let repair_request = RepairProtocol::WindowIndex {
+            header: RepairRequestHeader::new(
+                keypair.pubkey(),
+                *repair_peer_info.pubkey(),
+                timestamp(),
+                nonce,
+            ),
+            slot,
+            shred_index,
+        };
 
-        // Create repair request packet
-        let mut packet = Packet::default();
-        packet.meta_mut().size = 1024;
+        let request_bytes = ServeRepair::repair_proto_to_bytes(&repair_request, &keypair)
+            .context("Failed to create repair request")?;
 
-        // Send repair request
         println!("Sending repair request to {}", repair_peer_addr);
         self.repair_socket
-            .send_to(packet.buffer_mut(), repair_peer_addr)
+            .send_to(&request_bytes, repair_peer_addr)
             .context("Failed to send repair request")?;
 
-        // Try to receive response with a timeout
-        let mut response_packet = Packet::default();
-        match self.repair_socket.recv_from(response_packet.buffer_mut()) {
-            Ok((size, addr)) => {
-                println!("Received response from {}", addr);
-                response_packet.meta_mut().size = size;
+        // 设置接收超时
+        self.repair_socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
-                // Process and store the response
-                if let Some(shred_data) = response_packet.data(..) {
-                    println!("Received repair response of size: {}", shred_data.len());
-                    println!("First few bytes of response: {:?}", &shred_data[..std::cmp::min(32, shred_data.len())]);
+        // 接收响应
+        let mut buffer = [0u8; 65536];  // 64KB buffer
+        match self.repair_socket.recv_from(&mut buffer) {
+            Ok((size, from)) => {
+                println!("Received {} bytes from {}", size, from);
+                
+                // 尝试将数据作为 shred 插入到 blockstore
+                if let Ok(shred) = Shred::new_from_serialized_shred(buffer[..size].to_vec()) {
+                    println!("Successfully parsed shred for slot {}", shred.slot());
+                    
+                    // 插入到 blockstore
+                    if let Err(e) = self.blockstore.insert_shreds(
+                        vec![shred],
+                        None, // leader_schedule
+                        false, // is_trusted
+                    ) {
+                        println!("Failed to insert shred into blockstore: {}", e);
+                    } else {
+                        println!("Successfully inserted shred into blockstore for slot {}", slot);
+                    }
+                } else {
+                    println!("Failed to parse received data as shred");
                 }
             }
             Err(e) => {
                 println!("No response received: {}", e);
-                // Continue even if we don't receive a response
             }
         }
-
         Ok(())
     }
 }
