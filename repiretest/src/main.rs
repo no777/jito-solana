@@ -32,10 +32,11 @@ use {
         collections::HashSet,
         env,
         fs,
-        net::{SocketAddr, UdpSocket},
+        net::{SocketAddr, UdpSocket, IpAddr},
         path::{Path, PathBuf},
         sync::{atomic::AtomicBool, Arc, RwLock},
         time::Duration,
+        str::FromStr,
     },
 };
 
@@ -47,17 +48,45 @@ struct RepairClient {
 }
 
 impl RepairClient {
-    pub fn new(ledger_path: &Path, local_addr: &str) -> Result<Self> {
+    pub fn new(ledger_path: &Path, local_addr: &str, public_addr: Option<&str>) -> Result<Self> {
         // Initialize node and cluster info
         let node_keypair = Arc::new(Keypair::new());
-        let node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
+        
+        // If public_addr is provided, use it for the node's contact info
+        let node = if let Some(public_ip) = public_addr {
+            let mut node = Node::new_localhost_with_pubkey(&node_keypair.pubkey());
+            let mut info = node.info.clone();
+            
+            // Parse the IP address once
+            let ip = IpAddr::from_str(public_ip).context("Failed to parse public IP")?;
+            
+            // Create socket addresses for each service
+            let gossip_addr = SocketAddr::new(ip, 8000);
+            let tpu_addr = SocketAddr::new(ip, 8001);
+            let tpu_forwards_addr = SocketAddr::new(ip, 8002);
+            let tvu_addr = SocketAddr::new(ip, 8003);
+            let serve_repair_addr = SocketAddr::new(ip, 8004);
+            
+            // Set the addresses
+            let _ = info.set_gossip(gossip_addr);
+            let _ = info.set_tpu(tpu_addr);
+            let _ = info.set_tpu_forwards(tpu_forwards_addr);
+            let _ = info.set_tvu(tvu_addr);
+            let _ = info.set_serve_repair(serve_repair_addr);
+            
+            node.info = info;
+            node
+        } else {
+            Node::new_localhost_with_pubkey(&node_keypair.pubkey())
+        };
+
         let cluster_info = Arc::new(ClusterInfo::new(
             node.info.clone(),
             node_keypair.clone(),
             SocketAddrSpace::Unspecified,
         ));
 
-        // Initialize repair socket with provided local address
+        // Always bind to local address for the socket
         let bind_addr = format!("{}:0", local_addr);
         println!("Binding repair socket to {}", bind_addr);
         let repair_socket = UdpSocket::bind(&bind_addr).context("Failed to bind repair socket")?;
@@ -166,22 +195,28 @@ impl RepairClient {
         packet.meta_mut().size = 1024;
 
         // Send repair request
+        println!("Sending repair request to {}", repair_peer_addr);
         self.repair_socket
             .send_to(packet.buffer_mut(), repair_peer_addr)
             .context("Failed to send repair request")?;
 
-        // Receive response
+        // Try to receive response with a timeout
         let mut response_packet = Packet::default();
-        let (size, _addr) = self
-            .repair_socket
-            .recv_from(response_packet.buffer_mut())
-            .context("Failed to receive repair response")?;
-        response_packet.meta_mut().size = size;
+        match self.repair_socket.recv_from(response_packet.buffer_mut()) {
+            Ok((size, addr)) => {
+                println!("Received response from {}", addr);
+                response_packet.meta_mut().size = size;
 
-        // Process and store the response
-        if let Some(shred_data) = response_packet.data(..) {
-            println!("Received repair response of size: {}", shred_data.len());
-            println!("First few bytes of response: {:?}", &shred_data[..std::cmp::min(32, shred_data.len())]);
+                // Process and store the response
+                if let Some(shred_data) = response_packet.data(..) {
+                    println!("Received repair response of size: {}", shred_data.len());
+                    println!("First few bytes of response: {:?}", &shred_data[..std::cmp::min(32, shred_data.len())]);
+                }
+            }
+            Err(e) => {
+                println!("No response received: {}", e);
+                // Continue even if we don't receive a response
+            }
         }
 
         Ok(())
@@ -197,14 +232,17 @@ async fn main() -> Result<()> {
     let target_ip = args.get(1)
         .ok_or_else(|| anyhow!("Please provide a target IP address as the first argument"))?;
     
-    // Second argument is the local IP to bind to (optional, defaults to "0.0.0.0")
-    let local_ip = args.get(2).map(|s| s.as_str()).unwrap_or("0.0.0.0");
+    // Second argument is the public IP (optional)
+    let public_ip = args.get(2).map(|s| s.as_str());
+    
+    // Always bind to localhost
+    let local_ip = "0.0.0.0";
 
     // Third argument is the ledger path (optional, defaults to "./test-ledger")
     let ledger_path = args.get(3).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./test-ledger"));
 
-    println!("Using local IP: {}, target IP: {}, ledger path: {}", 
-             local_ip, target_ip, ledger_path.display());
+    println!("Using local IP: {}, public IP: {}, target IP: {}, ledger path: {}", 
+             local_ip, public_ip.unwrap_or("none"), target_ip, ledger_path.display());
 
     // Create ledger directory if it doesn't exist
     if !ledger_path.exists() {
@@ -212,11 +250,12 @@ async fn main() -> Result<()> {
     }
     
     // Initialize repair client with local IP and ledger path
-    let repair_client = RepairClient::new(&ledger_path, local_ip)?;
+    let repair_client = RepairClient::new(&ledger_path, local_ip, public_ip)?;
 
     // Send repair requests to target IP
     for i in 8001..8010 {
-        let repair_peer_addr = format!("{}:{}", target_ip, i).parse().unwrap(); 
+        let repair_peer_addr = SocketAddr::new(IpAddr::from_str(target_ip).context("Failed to parse target IP")?, i);
+        
         let slot = 307798183;
         let shred_index = 0;
 
