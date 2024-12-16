@@ -6,7 +6,7 @@ use {
         contact_info::ContactInfo,
     }, solana_ledger::{
         blockstore::Blockstore,
-        blockstore_options::{AccessType, LedgerColumnOptions},
+        blockstore_options::{AccessType, BlockstoreOptions, LedgerColumnOptions, ShredStorageType},
     }, solana_runtime::{
         bank::Bank,
         bank_forks::BankForks,
@@ -50,15 +50,18 @@ impl RepairClient {
             .set_read_timeout(Some(Duration::from_secs(5)))
             .context("Failed to set socket timeout")?;
 
-        // Initialize blockstore
+        // Initialize blockstore with modified options
         let blockstore = Arc::new(
             Blockstore::open_with_options(
                 ledger_path,
-                solana_ledger::blockstore_options::BlockstoreOptions {
+                BlockstoreOptions {
                     access_type: AccessType::Primary,
                     recovery_mode: None,
-                    enforce_ulimit_nofile: true,
-                    column_options: LedgerColumnOptions::default(),
+                    enforce_ulimit_nofile: false, // Disable file descriptor limit check
+                    column_options: LedgerColumnOptions {
+                        shred_storage_type: ShredStorageType::RocksLevel,
+                        ..LedgerColumnOptions::default()
+                    },
                 },
             )
             .context("Failed to open blockstore")?,
@@ -153,7 +156,7 @@ async fn main() -> Result<()> {
     // Second argument is the local IP to bind to (optional, defaults to "0.0.0.0")
     let local_ip = args.get(2).map(|s| s.as_str()).unwrap_or("0.0.0.0");
 
-    // Third argument is the ledger path (optional, defaults to "./ledger")
+    // Third argument is the ledger path (optional, defaults to "./test-ledger")
     let ledger_path = args.get(3).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./test-ledger"));
 
     println!("Using local IP: {}, target IP: {}, ledger path: {}", 
