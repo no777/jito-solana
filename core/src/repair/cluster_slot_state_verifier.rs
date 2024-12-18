@@ -931,8 +931,8 @@ pub(crate) fn check_slot_agrees_with_cluster(
     }
 
     // 获取 slot 的状态并打印交易信息
-    let status = BankStatus::Unprocessed;  // 或者根据实际情况获取正确的状态
-    status.print_slot_transactions(blockstore, slot);
+    // let status = BankStatus::Unprocessed;  // 或者根据实际情况获取正确的状态
+    // status.print_slot_transactions(blockstore, slot);
 
     // Needs to happen before the bank_frozen_hash.is_none() check below to account for duplicate
     // signals arriving before the bank is constructed in replay.
