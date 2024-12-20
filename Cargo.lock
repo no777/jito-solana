@@ -2281,6 +2281,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_logger"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
+dependencies = [
+ "humantime",
+ "is-terminal",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5110,7 +5123,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
+ "env_logger 0.10.2",
+ "log",
  "rand 0.8.5",
+ "reqwest",
  "solana-accounts-db",
  "solana-client",
  "solana-core",
@@ -5700,6 +5716,25 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "shred-collector"
+version = "2.1.0"
+dependencies = [
+ "clap 2.34.0",
+ "log",
+ "rand 0.7.3",
+ "solana-clap-utils",
+ "solana-core",
+ "solana-gossip",
+ "solana-logger",
+ "solana-net-utils",
+ "solana-perf",
+ "solana-sdk",
+ "solana-streamer",
+ "solana-version",
+ "tokio",
+]
 
 [[package]]
 name = "shuttle"
@@ -7119,7 +7154,7 @@ dependencies = [
 name = "solana-logger"
 version = "2.1.0"
 dependencies = [
- "env_logger",
+ "env_logger 0.9.3",
  "lazy_static",
  "log",
 ]
@@ -7163,7 +7198,7 @@ name = "solana-metrics"
 version = "2.1.0"
 dependencies = [
  "crossbeam-channel",
- "env_logger",
+ "env_logger 0.9.3",
  "gethostname",
  "lazy_static",
  "log",
@@ -8193,7 +8228,7 @@ dependencies = [
  "anchor-lang",
  "clap 4.5.23",
  "crossbeam-channel",
- "env_logger",
+ "env_logger 0.9.3",
  "futures 0.3.31",
  "gethostname",
  "im",
