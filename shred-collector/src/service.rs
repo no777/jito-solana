@@ -93,7 +93,7 @@ impl ShredCollectorService {
 
                 debug!("Bank created successfully");
                 
-                let bank_forks = BankForks::new_rw_arc(bank);
+                let bank_forks: Arc<RwLock<BankForks>> = BankForks::new_rw_arc(bank);
                 
                 // Create repair whitelist
                 let repair_whitelist = Arc::new(RwLock::new(HashSet::default()));
@@ -125,14 +125,24 @@ impl ShredCollectorService {
 
                 // Initialize repair slots with start_slot
                 let repair_slots = vec![start_slot];
-                let wen_restart_repair_slots = Arc::new(RwLock::new(repair_slots));
 
+                let wen_restart_repair_slots = Arc::new(RwLock::new(repair_slots));
+                let epoch_schedule = bank_forks
+                .read()
+                .unwrap()
+                .working_bank()
+                .epoch_schedule()
+                .clone();
                 // Create RepairInfo
+
+           
+
+                
                 let repair_info = RepairInfo {
-                    bank_forks,
+                    bank_forks: bank_forks.clone(),
                     cluster_info: cluster_info.clone(),
                     cluster_slots: cluster_slots.clone(),
-                    epoch_schedule: EpochSchedule::default(),
+                    epoch_schedule,
                     repair_validators: None,
                     repair_whitelist,
                     ancestor_duplicate_slots_sender,

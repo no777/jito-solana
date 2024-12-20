@@ -22,6 +22,7 @@ use {
     solana_net_utils::{
         VALIDATOR_PORT_RANGE, parse_host, parse_port_or_addr, get_public_ip_addr,
     },
+
     solana_sdk::{
         pubkey::Pubkey,
         signature::Signer,
@@ -30,7 +31,7 @@ use {
     solana_streamer::socket::SocketAddrSpace,
     service::ShredCollectorService,
     std::{
-        net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket, ToSocketAddrs},
+        net::{IpAddr, Ipv4Addr, SocketAddr,  ToSocketAddrs},
         path::PathBuf,
         process,
         sync::{atomic::{AtomicBool, Ordering}, Arc},
@@ -258,6 +259,7 @@ fn main() {
         }),
     );
 
+   
     let shred_collector = ShredCollectorService::new(
         node.clone(),
         blockstore,
@@ -266,6 +268,7 @@ fn main() {
         start_slot,
         exit.clone(),
     );
+
 
     info!("Started shred collector service");
 
@@ -278,4 +281,5 @@ fn main() {
 
     exit.store(true, Ordering::Relaxed);
     shred_collector.join().unwrap();
+
 }
