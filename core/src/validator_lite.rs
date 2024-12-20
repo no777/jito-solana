@@ -28,6 +28,7 @@ use {
         tip_manager::TipManagerConfig,
         tpu::{Tpu, TpuSockets, DEFAULT_TPU_COALESCE},
         tvu::{Tvu, TvuConfig, TvuSockets},
+        validator::{BlockProductionMethod, ValidatorConfig,BlockVerificationMethod,ValidatorStartProgress},
     },
     anyhow::{anyhow, Context, Result},
     crossbeam_channel::{bounded, unbounded, Receiver},
@@ -155,294 +156,294 @@ const WAIT_FOR_SUPERMAJORITY_THRESHOLD_PERCENT: u64 = 80;
 const WAIT_FOR_WEN_RESTART_SUPERMAJORITY_THRESHOLD_PERCENT: u64 =
     WAIT_FOR_SUPERMAJORITY_THRESHOLD_PERCENT;
 
-#[derive(Clone, EnumString, EnumVariantNames, Default, IntoStaticStr, Display)]
-#[strum(serialize_all = "kebab-case")]
-pub enum BlockVerificationMethod {
-    #[default]
-    BlockstoreProcessor,
-    UnifiedScheduler,
-}
+// #[derive(Clone, EnumString, EnumVariantNames, Default, IntoStaticStr, Display)]
+// #[strum(serialize_all = "kebab-case")]
+// pub enum BlockVerificationMethod {
+//     #[default]
+//     BlockstoreProcessor,
+//     UnifiedScheduler,
+// }
 
-impl BlockVerificationMethod {
-    pub const fn cli_names() -> &'static [&'static str] {
-        Self::VARIANTS
-    }
+// impl BlockVerificationMethod {
+//     pub const fn cli_names() -> &'static [&'static str] {
+//         Self::VARIANTS
+//     }
 
-    pub fn cli_message() -> &'static str {
-        lazy_static! {
-            static ref MESSAGE: String = format!(
-                "Switch transaction scheduling method for verifying ledger entries [default: {}]",
-                BlockVerificationMethod::default()
-            );
-        };
+//     pub fn cli_message() -> &'static str {
+//         lazy_static! {
+//             static ref MESSAGE: String = format!(
+//                 "Switch transaction scheduling method for verifying ledger entries [default: {}]",
+//                 BlockVerificationMethod::default()
+//             );
+//         };
 
-        &MESSAGE
-    }
-}
+//         &MESSAGE
+//     }
+// }
 
-#[derive(Clone, EnumString, EnumVariantNames, Default, IntoStaticStr, Display)]
-#[strum(serialize_all = "kebab-case")]
-pub enum BlockProductionMethod {
-    ThreadLocalMultiIterator,
-    #[default]
-    CentralScheduler,
-}
+// #[derive(Clone, EnumString, EnumVariantNames, Default, IntoStaticStr, Display)]
+// #[strum(serialize_all = "kebab-case")]
+// pub enum BlockProductionMethod {
+//     ThreadLocalMultiIterator,
+//     #[default]
+//     CentralScheduler,
+// }
 
-impl BlockProductionMethod {
-    pub const fn cli_names() -> &'static [&'static str] {
-        Self::VARIANTS
-    }
+// impl BlockProductionMethod {
+//     pub const fn cli_names() -> &'static [&'static str] {
+//         Self::VARIANTS
+//     }
 
-    pub fn cli_message() -> &'static str {
-        lazy_static! {
-            static ref MESSAGE: String = format!(
-                "Switch transaction scheduling method for producing ledger entries [default: {}]",
-                BlockProductionMethod::default()
-            );
-        };
+//     pub fn cli_message() -> &'static str {
+//         lazy_static! {
+//             static ref MESSAGE: String = format!(
+//                 "Switch transaction scheduling method for producing ledger entries [default: {}]",
+//                 BlockProductionMethod::default()
+//             );
+//         };
 
-        &MESSAGE
-    }
-}
+//         &MESSAGE
+//     }
+// }
 
 /// Configuration for the block generator invalidator for replay.
-#[derive(Clone, Debug)]
-pub struct GeneratorConfig {
-    pub accounts_path: String,
-    pub starting_keypairs: Arc<Vec<Keypair>>,
-}
+// #[derive(Clone, Debug)]
+// pub struct GeneratorConfig {
+//     pub accounts_path: String,
+//     pub starting_keypairs: Arc<Vec<Keypair>>,
+// }
 
-pub struct ValidatorConfig {
-    pub halt_at_slot: Option<Slot>,
-    pub expected_genesis_hash: Option<Hash>,
-    pub expected_bank_hash: Option<Hash>,
-    pub expected_shred_version: Option<u16>,
-    pub voting_disabled: bool,
-    pub account_paths: Vec<PathBuf>,
-    pub account_snapshot_paths: Vec<PathBuf>,
-    pub rpc_config: JsonRpcConfig,
-    /// Specifies which plugins to start up with
-    pub on_start_geyser_plugin_config_files: Option<Vec<PathBuf>>,
-    pub rpc_addrs: Option<(SocketAddr, SocketAddr)>,
-    // (JsonRpc, JsonRpcPubSub)
-    pub pubsub_config: PubSubConfig,
-    pub snapshot_config: SnapshotConfig,
-    pub max_ledger_shreds: Option<u64>,
-    pub broadcast_stage_type: BroadcastStageType,
-    pub turbine_disabled: Arc<AtomicBool>,
-    pub enforce_ulimit_nofile: bool,
-    pub fixed_leader_schedule: Option<FixedSchedule>,
-    pub wait_for_supermajority: Option<Slot>,
-    pub new_hard_forks: Option<Vec<Slot>>,
-    pub known_validators: Option<HashSet<Pubkey>>,
-    // None = trust all
-    pub repair_validators: Option<HashSet<Pubkey>>,
-    // None = repair from all
-    pub repair_whitelist: Arc<RwLock<HashSet<Pubkey>>>,
-    // Empty = repair with all
-    pub gossip_validators: Option<HashSet<Pubkey>>,
-    // None = gossip with all
-    pub accounts_hash_interval_slots: u64,
-    pub max_genesis_archive_unpacked_size: u64,
-    pub wal_recovery_mode: Option<BlockstoreRecoveryMode>,
-    /// Run PoH, transaction signature and other transaction verifications during blockstore
-    /// processing.
-    pub run_verification: bool,
-    pub require_tower: bool,
-    pub tower_storage: Arc<dyn TowerStorage>,
-    pub debug_keys: Option<Arc<HashSet<Pubkey>>>,
-    pub contact_debug_interval: u64,
-    pub contact_save_interval: u64,
-    pub send_transaction_service_config: send_transaction_service::Config,
-    pub no_poh_speed_test: bool,
-    pub no_os_memory_stats_reporting: bool,
-    pub no_os_network_stats_reporting: bool,
-    pub no_os_cpu_stats_reporting: bool,
-    pub no_os_disk_stats_reporting: bool,
-    pub poh_pinned_cpu_core: usize,
-    pub poh_hashes_per_batch: u64,
-    pub process_ledger_before_services: bool,
-    pub account_indexes: AccountSecondaryIndexes,
-    pub accounts_db_config: Option<AccountsDbConfig>,
-    pub warp_slot: Option<Slot>,
-    pub accounts_db_test_hash_calculation: bool,
-    pub accounts_db_skip_shrink: bool,
-    pub accounts_db_force_initial_clean: bool,
-    pub tpu_coalesce: Duration,
-    pub staked_nodes_overrides: Arc<RwLock<HashMap<Pubkey, u64>>>,
-    pub validator_exit: Arc<RwLock<Exit>>,
-    pub no_wait_for_vote_to_start_leader: bool,
-    pub accounts_shrink_ratio: AccountShrinkThreshold,
-    pub wait_to_vote_slot: Option<Slot>,
-    pub ledger_column_options: LedgerColumnOptions,
-    pub runtime_config: RuntimeConfig,
-    pub banking_trace_dir_byte_limit: banking_trace::DirByteLimit,
-    pub block_verification_method: BlockVerificationMethod,
-    pub block_production_method: BlockProductionMethod,
-    pub enable_block_production_forwarding: bool,
-    pub generator_config: Option<GeneratorConfig>,
-    pub use_snapshot_archives_at_startup: UseSnapshotArchivesAtStartup,
-    pub wen_restart_proto_path: Option<PathBuf>,
-    pub unified_scheduler_handler_threads: Option<usize>,
-    pub ip_echo_server_threads: NonZeroUsize,
-    pub replay_forks_threads: NonZeroUsize,
-    pub replay_transactions_threads: NonZeroUsize,
-    pub delay_leader_block_for_pending_fork: bool,
-    pub relayer_config: Arc<Mutex<RelayerConfig>>,
-    pub block_engine_config: Arc<Mutex<BlockEngineConfig>>,
-    // Using Option inside RwLock is ugly, but only convenient way to allow toggle on/off
-    pub shred_receiver_address: Arc<RwLock<Option<SocketAddr>>>,
-    pub shred_retransmit_receiver_address: Arc<RwLock<Option<SocketAddr>>>,
-    pub tip_manager_config: TipManagerConfig,
-    pub preallocated_bundle_cost: u64,
-}
+// pub struct ValidatorConfig {
+//     pub halt_at_slot: Option<Slot>,
+//     pub expected_genesis_hash: Option<Hash>,
+//     pub expected_bank_hash: Option<Hash>,
+//     pub expected_shred_version: Option<u16>,
+//     pub voting_disabled: bool,
+//     pub account_paths: Vec<PathBuf>,
+//     pub account_snapshot_paths: Vec<PathBuf>,
+//     pub rpc_config: JsonRpcConfig,
+//     /// Specifies which plugins to start up with
+//     pub on_start_geyser_plugin_config_files: Option<Vec<PathBuf>>,
+//     pub rpc_addrs: Option<(SocketAddr, SocketAddr)>,
+//     // (JsonRpc, JsonRpcPubSub)
+//     pub pubsub_config: PubSubConfig,
+//     pub snapshot_config: SnapshotConfig,
+//     pub max_ledger_shreds: Option<u64>,
+//     pub broadcast_stage_type: BroadcastStageType,
+//     pub turbine_disabled: Arc<AtomicBool>,
+//     pub enforce_ulimit_nofile: bool,
+//     pub fixed_leader_schedule: Option<FixedSchedule>,
+//     pub wait_for_supermajority: Option<Slot>,
+//     pub new_hard_forks: Option<Vec<Slot>>,
+//     pub known_validators: Option<HashSet<Pubkey>>,
+//     // None = trust all
+//     pub repair_validators: Option<HashSet<Pubkey>>,
+//     // None = repair from all
+//     pub repair_whitelist: Arc<RwLock<HashSet<Pubkey>>>,
+//     // Empty = repair with all
+//     pub gossip_validators: Option<HashSet<Pubkey>>,
+//     // None = gossip with all
+//     pub accounts_hash_interval_slots: u64,
+//     pub max_genesis_archive_unpacked_size: u64,
+//     pub wal_recovery_mode: Option<BlockstoreRecoveryMode>,
+//     /// Run PoH, transaction signature and other transaction verifications during blockstore
+//     /// processing.
+//     pub run_verification: bool,
+//     pub require_tower: bool,
+//     pub tower_storage: Arc<dyn TowerStorage>,
+//     pub debug_keys: Option<Arc<HashSet<Pubkey>>>,
+//     pub contact_debug_interval: u64,
+//     pub contact_save_interval: u64,
+//     pub send_transaction_service_config: send_transaction_service::Config,
+//     pub no_poh_speed_test: bool,
+//     pub no_os_memory_stats_reporting: bool,
+//     pub no_os_network_stats_reporting: bool,
+//     pub no_os_cpu_stats_reporting: bool,
+//     pub no_os_disk_stats_reporting: bool,
+//     pub poh_pinned_cpu_core: usize,
+//     pub poh_hashes_per_batch: u64,
+//     pub process_ledger_before_services: bool,
+//     pub account_indexes: AccountSecondaryIndexes,
+//     pub accounts_db_config: Option<AccountsDbConfig>,
+//     pub warp_slot: Option<Slot>,
+//     pub accounts_db_test_hash_calculation: bool,
+//     pub accounts_db_skip_shrink: bool,
+//     pub accounts_db_force_initial_clean: bool,
+//     pub tpu_coalesce: Duration,
+//     pub staked_nodes_overrides: Arc<RwLock<HashMap<Pubkey, u64>>>,
+//     pub validator_exit: Arc<RwLock<Exit>>,
+//     pub no_wait_for_vote_to_start_leader: bool,
+//     pub accounts_shrink_ratio: AccountShrinkThreshold,
+//     pub wait_to_vote_slot: Option<Slot>,
+//     pub ledger_column_options: LedgerColumnOptions,
+//     pub runtime_config: RuntimeConfig,
+//     pub banking_trace_dir_byte_limit: banking_trace::DirByteLimit,
+//     pub block_verification_method: BlockVerificationMethod,
+//     pub block_production_method: BlockProductionMethod,
+//     pub enable_block_production_forwarding: bool,
+//     pub generator_config: Option<GeneratorConfig>,
+//     pub use_snapshot_archives_at_startup: UseSnapshotArchivesAtStartup,
+//     pub wen_restart_proto_path: Option<PathBuf>,
+//     pub unified_scheduler_handler_threads: Option<usize>,
+//     pub ip_echo_server_threads: NonZeroUsize,
+//     pub replay_forks_threads: NonZeroUsize,
+//     pub replay_transactions_threads: NonZeroUsize,
+//     pub delay_leader_block_for_pending_fork: bool,
+//     pub relayer_config: Arc<Mutex<RelayerConfig>>,
+//     pub block_engine_config: Arc<Mutex<BlockEngineConfig>>,
+//     // Using Option inside RwLock is ugly, but only convenient way to allow toggle on/off
+//     pub shred_receiver_address: Arc<RwLock<Option<SocketAddr>>>,
+//     pub shred_retransmit_receiver_address: Arc<RwLock<Option<SocketAddr>>>,
+//     pub tip_manager_config: TipManagerConfig,
+//     pub preallocated_bundle_cost: u64,
+// }
 
-impl Default for ValidatorConfig {
-    fn default() -> Self {
-        Self {
-            halt_at_slot: None,
-            expected_genesis_hash: None,
-            expected_bank_hash: None,
-            expected_shred_version: None,
-            voting_disabled: false,
-            max_ledger_shreds: None,
-            account_paths: Vec::new(),
-            account_snapshot_paths: Vec::new(),
-            rpc_config: JsonRpcConfig::default(),
-            on_start_geyser_plugin_config_files: None,
-            rpc_addrs: None,
-            pubsub_config: PubSubConfig::default(),
-            snapshot_config: SnapshotConfig::new_load_only(),
-            broadcast_stage_type: BroadcastStageType::Standard,
-            turbine_disabled: Arc::<AtomicBool>::default(),
-            enforce_ulimit_nofile: true,
-            fixed_leader_schedule: None,
-            wait_for_supermajority: None,
-            new_hard_forks: None,
-            known_validators: None,
-            repair_validators: None,
-            repair_whitelist: Arc::new(RwLock::new(HashSet::default())),
-            gossip_validators: None,
-            accounts_hash_interval_slots: u64::MAX,
-            max_genesis_archive_unpacked_size: MAX_GENESIS_ARCHIVE_UNPACKED_SIZE,
-            wal_recovery_mode: None,
-            run_verification: true,
-            require_tower: false,
-            tower_storage: Arc::new(NullTowerStorage::default()),
-            debug_keys: None,
-            contact_debug_interval: DEFAULT_CONTACT_DEBUG_INTERVAL_MILLIS,
-            contact_save_interval: DEFAULT_CONTACT_SAVE_INTERVAL_MILLIS,
-            send_transaction_service_config: send_transaction_service::Config::default(),
-            no_poh_speed_test: true,
-            no_os_memory_stats_reporting: true,
-            no_os_network_stats_reporting: true,
-            no_os_cpu_stats_reporting: true,
-            no_os_disk_stats_reporting: true,
-            poh_pinned_cpu_core: poh_service::DEFAULT_PINNED_CPU_CORE,
-            poh_hashes_per_batch: poh_service::DEFAULT_HASHES_PER_BATCH,
-            process_ledger_before_services: false,
-            account_indexes: AccountSecondaryIndexes::default(),
-            warp_slot: None,
-            accounts_db_test_hash_calculation: false,
-            accounts_db_skip_shrink: false,
-            accounts_db_force_initial_clean: false,
-            tpu_coalesce: DEFAULT_TPU_COALESCE,
-            staked_nodes_overrides: Arc::new(RwLock::new(HashMap::new())),
-            validator_exit: Arc::new(RwLock::new(Exit::default())),
-            no_wait_for_vote_to_start_leader: true,
-            accounts_shrink_ratio: AccountShrinkThreshold::default(),
-            accounts_db_config: None,
-            wait_to_vote_slot: None,
-            ledger_column_options: LedgerColumnOptions::default(),
-            runtime_config: RuntimeConfig::default(),
-            banking_trace_dir_byte_limit: 0,
-            block_verification_method: BlockVerificationMethod::default(),
-            block_production_method: BlockProductionMethod::default(),
-            enable_block_production_forwarding: false,
-            generator_config: None,
-            use_snapshot_archives_at_startup: UseSnapshotArchivesAtStartup::default(),
-            wen_restart_proto_path: None,
-            unified_scheduler_handler_threads: None,
-            ip_echo_server_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
-            replay_forks_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
-            replay_transactions_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
-            delay_leader_block_for_pending_fork: false,
-            relayer_config: Arc::new(Mutex::new(RelayerConfig::default())),
-            block_engine_config: Arc::new(Mutex::new(BlockEngineConfig::default())),
-            shred_receiver_address: Arc::new(RwLock::new(None)),
-            shred_retransmit_receiver_address: Arc::new(RwLock::new(None)),
-            tip_manager_config: TipManagerConfig::default(),
-            preallocated_bundle_cost: u64::default(),
-        }
-    }
-}
+// impl Default for ValidatorConfig {
+//     fn default() -> Self {
+//         Self {
+//             halt_at_slot: None,
+//             expected_genesis_hash: None,
+//             expected_bank_hash: None,
+//             expected_shred_version: None,
+//             voting_disabled: false,
+//             max_ledger_shreds: None,
+//             account_paths: Vec::new(),
+//             account_snapshot_paths: Vec::new(),
+//             rpc_config: JsonRpcConfig::default(),
+//             on_start_geyser_plugin_config_files: None,
+//             rpc_addrs: None,
+//             pubsub_config: PubSubConfig::default(),
+//             snapshot_config: SnapshotConfig::new_load_only(),
+//             broadcast_stage_type: BroadcastStageType::Standard,
+//             turbine_disabled: Arc::<AtomicBool>::default(),
+//             enforce_ulimit_nofile: true,
+//             fixed_leader_schedule: None,
+//             wait_for_supermajority: None,
+//             new_hard_forks: None,
+//             known_validators: None,
+//             repair_validators: None,
+//             repair_whitelist: Arc::new(RwLock::new(HashSet::default())),
+//             gossip_validators: None,
+//             accounts_hash_interval_slots: u64::MAX,
+//             max_genesis_archive_unpacked_size: MAX_GENESIS_ARCHIVE_UNPACKED_SIZE,
+//             wal_recovery_mode: None,
+//             run_verification: true,
+//             require_tower: false,
+//             tower_storage: Arc::new(NullTowerStorage::default()),
+//             debug_keys: None,
+//             contact_debug_interval: DEFAULT_CONTACT_DEBUG_INTERVAL_MILLIS,
+//             contact_save_interval: DEFAULT_CONTACT_SAVE_INTERVAL_MILLIS,
+//             send_transaction_service_config: send_transaction_service::Config::default(),
+//             no_poh_speed_test: true,
+//             no_os_memory_stats_reporting: true,
+//             no_os_network_stats_reporting: true,
+//             no_os_cpu_stats_reporting: true,
+//             no_os_disk_stats_reporting: true,
+//             poh_pinned_cpu_core: poh_service::DEFAULT_PINNED_CPU_CORE,
+//             poh_hashes_per_batch: poh_service::DEFAULT_HASHES_PER_BATCH,
+//             process_ledger_before_services: false,
+//             account_indexes: AccountSecondaryIndexes::default(),
+//             warp_slot: None,
+//             accounts_db_test_hash_calculation: false,
+//             accounts_db_skip_shrink: false,
+//             accounts_db_force_initial_clean: false,
+//             tpu_coalesce: DEFAULT_TPU_COALESCE,
+//             staked_nodes_overrides: Arc::new(RwLock::new(HashMap::new())),
+//             validator_exit: Arc::new(RwLock::new(Exit::default())),
+//             no_wait_for_vote_to_start_leader: true,
+//             accounts_shrink_ratio: AccountShrinkThreshold::default(),
+//             accounts_db_config: None,
+//             wait_to_vote_slot: None,
+//             ledger_column_options: LedgerColumnOptions::default(),
+//             runtime_config: RuntimeConfig::default(),
+//             banking_trace_dir_byte_limit: 0,
+//             block_verification_method: BlockVerificationMethod::default(),
+//             block_production_method: BlockProductionMethod::default(),
+//             enable_block_production_forwarding: false,
+//             generator_config: None,
+//             use_snapshot_archives_at_startup: UseSnapshotArchivesAtStartup::default(),
+//             wen_restart_proto_path: None,
+//             unified_scheduler_handler_threads: None,
+//             ip_echo_server_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
+//             replay_forks_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
+//             replay_transactions_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
+//             delay_leader_block_for_pending_fork: false,
+//             relayer_config: Arc::new(Mutex::new(RelayerConfig::default())),
+//             block_engine_config: Arc::new(Mutex::new(BlockEngineConfig::default())),
+//             shred_receiver_address: Arc::new(RwLock::new(None)),
+//             shred_retransmit_receiver_address: Arc::new(RwLock::new(None)),
+//             tip_manager_config: TipManagerConfig::default(),
+//             preallocated_bundle_cost: u64::default(),
+//         }
+//     }
+// }
 
-impl ValidatorConfig {
-    pub fn default_for_test() -> Self {
-        Self {
-            enforce_ulimit_nofile: false,
-            rpc_config: JsonRpcConfig::default_for_test(),
-            block_production_method: BlockProductionMethod::default(),
-            enable_block_production_forwarding: true, // enable forwarding by default for tests
-            replay_forks_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
-            replay_transactions_threads: NonZeroUsize::new(get_max_thread_count())
-                .expect("thread count is non-zero"),
-            ..Self::default()
-        }
-    }
+// impl ValidatorConfig {
+//     pub fn default_for_test() -> Self {
+//         Self {
+//             enforce_ulimit_nofile: false,
+//             rpc_config: JsonRpcConfig::default_for_test(),
+//             block_production_method: BlockProductionMethod::default(),
+//             enable_block_production_forwarding: true, // enable forwarding by default for tests
+//             replay_forks_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
+//             replay_transactions_threads: NonZeroUsize::new(get_max_thread_count())
+//                 .expect("thread count is non-zero"),
+//             ..Self::default()
+//         }
+//     }
 
-    pub fn enable_default_rpc_block_subscribe(&mut self) {
-        let pubsub_config = PubSubConfig {
-            enable_block_subscription: true,
-            ..PubSubConfig::default()
-        };
-        let rpc_config = JsonRpcConfig {
-            enable_rpc_transaction_history: true,
-            ..JsonRpcConfig::default_for_test()
-        };
+//     pub fn enable_default_rpc_block_subscribe(&mut self) {
+//         let pubsub_config = PubSubConfig {
+//             enable_block_subscription: true,
+//             ..PubSubConfig::default()
+//         };
+//         let rpc_config = JsonRpcConfig {
+//             enable_rpc_transaction_history: true,
+//             ..JsonRpcConfig::default_for_test()
+//         };
 
-        self.pubsub_config = pubsub_config;
-        self.rpc_config = rpc_config;
-    }
-}
+//         self.pubsub_config = pubsub_config;
+//         self.rpc_config = rpc_config;
+//     }
+// }
 
 // `ValidatorStartProgress` contains status information that is surfaced to the node operator over
 // the admin RPC channel to help them to follow the general progress of node startup without
 // having to watch log messages.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ValidatorStartProgress {
-    Initializing,
-    // Catch all, default state
-    SearchingForRpcService,
-    DownloadingSnapshot {
-        slot: Slot,
-        rpc_addr: SocketAddr,
-    },
-    CleaningBlockStore,
-    CleaningAccounts,
-    LoadingLedger,
-    ProcessingLedger {
-        slot: Slot,
-        max_slot: Slot,
-    },
-    StartingServices,
-    Halted,
-    // Validator halted due to `--dev-halt-at-slot` argument
-    WaitingForSupermajority {
-        slot: Slot,
-        gossip_stake_percent: u64,
-    },
+// #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+// pub enum ValidatorStartProgress {
+//     Initializing,
+//     // Catch all, default state
+//     SearchingForRpcService,
+//     DownloadingSnapshot {
+//         slot: Slot,
+//         rpc_addr: SocketAddr,
+//     },
+//     CleaningBlockStore,
+//     CleaningAccounts,
+//     LoadingLedger,
+//     ProcessingLedger {
+//         slot: Slot,
+//         max_slot: Slot,
+//     },
+//     StartingServices,
+//     Halted,
+//     // Validator halted due to `--dev-halt-at-slot` argument
+//     WaitingForSupermajority {
+//         slot: Slot,
+//         gossip_stake_percent: u64,
+//     },
 
-    // `Running` is the terminal state once the validator fully starts and all services are
-    // operational
-    Running,
-}
+//     // `Running` is the terminal state once the validator fully starts and all services are
+//     // operational
+//     Running,
+// }
 
-impl Default for ValidatorStartProgress {
-    fn default() -> Self {
-        Self::Initializing
-    }
-}
+// impl Default for ValidatorStartProgress {
+//     fn default() -> Self {
+//         Self::Initializing
+//     }
+// }
 
 struct BlockstoreRootScan {
     thread: Option<JoinHandle<Result<usize, BlockstoreError>>>,
@@ -643,27 +644,27 @@ impl Validator {
             }
         }
 
-        info!("Cleaning accounts paths..");
-        *start_progress.write().unwrap() = ValidatorStartProgress::CleaningAccounts;
-        let mut timer = Measure::start("clean_accounts_paths");
-        cleanup_accounts_paths(config);
-        timer.stop();
-        info!("Cleaning accounts paths done. {timer}");
+        // info!("Cleaning accounts paths..");
+        // *start_progress.write().unwrap() = ValidatorStartProgress::CleaningAccounts;
+        // let mut timer = Measure::start("clean_accounts_paths");
+        // cleanup_accounts_paths(config);
+        // timer.stop();
+        // info!("Cleaning accounts paths done. {timer}");
 
-        snapshot_utils::purge_incomplete_bank_snapshots(&config.snapshot_config.bank_snapshots_dir);
-        snapshot_utils::purge_old_bank_snapshots_at_startup(
-            &config.snapshot_config.bank_snapshots_dir,
-        );
+        // snapshot_utils::purge_incomplete_bank_snapshots(&config.snapshot_config.bank_snapshots_dir);
+        // snapshot_utils::purge_old_bank_snapshots_at_startup(
+        //     &config.snapshot_config.bank_snapshots_dir,
+        // );
 
-        info!("Cleaning orphaned account snapshot directories..");
-        let mut timer = Measure::start("clean_orphaned_account_snapshot_dirs");
-        clean_orphaned_account_snapshot_dirs(
-            &config.snapshot_config.bank_snapshots_dir,
-            &config.account_snapshot_paths,
-        )
-        .context("failed to clean orphaned account snapshot directories")?;
-        timer.stop();
-        info!("Cleaning orphaned account snapshot directories done. {timer}");
+        // info!("Cleaning orphaned account snapshot directories..");
+        // let mut timer = Measure::start("clean_orphaned_account_snapshot_dirs");
+        // clean_orphaned_account_snapshot_dirs(
+        //     &config.snapshot_config.bank_snapshots_dir,
+        //     &config.account_snapshot_paths,
+        // )
+        // .context("failed to clean orphaned account snapshot directories")?;
+        // timer.stop();
+        // info!("Cleaning orphaned account snapshot directories done. {timer}");
 
         // The accounts hash cache dir was renamed, so cleanup any old dirs that exist.
         let accounts_hash_cache_path = config

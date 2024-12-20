@@ -50,6 +50,7 @@ pub mod tracer_packet_stats;
 pub mod tvu;
 pub mod unfrozen_gossip_verified_vote_hashes;
 pub mod validator;
+pub mod validator_lite;
 pub mod verified_vote_packets;
 pub mod vote_simulator;
 pub mod voting_service;

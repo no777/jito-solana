@@ -17,5 +17,7 @@ solana-sdk = { path = "../sdk" }
 solana-streamer = { path = "../streamer" }
 solana-logger = { path = "../logger" }
 solana-accounts-db = { path = "../accounts-db" }
+solana-rpc = { path = "../rpc" }
+solana-poh = { path = "../poh" }
 tokio = { version = "1.14.1", features = ["full"] }
 crossbeam-channel = "0.5"
