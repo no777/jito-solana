@@ -4,13 +4,11 @@ use {
     solana_ledger::{
         blockstore::Blockstore,
         shred::Shred,
+        genesis_utils::create_genesis_config,
     },
     solana_sdk::{
         clock::{Clock, Slot},
         signature::Signer,
-        sysvar::rent::Rent,
-        fee_calculator::FeeRateGovernor,
-        genesis_config::GenesisConfig,
         account::{Account, AccountSharedData},
         native_token::LAMPORTS_PER_SOL,
         system_program,
@@ -19,12 +17,19 @@ use {
             program as vote_program,
             state::{VoteInit, VoteState},
         },
+        stake::{
+            program as stake_program,
+            state::{Meta, StakeStateV2, Authorized, Lockup},
+        },
     },
     solana_runtime::{
         bank::Bank,
         bank_forks::BankForks,
-        runtime_config::RuntimeConfig,
+        genesis_utils::GenesisConfigInfo,
+
     },
+  
+
     solana_accounts_db::{
         accounts_index::AccountSecondaryIndexes,
         accounts_db::AccountShrinkThreshold,
@@ -38,13 +43,14 @@ use {
     std::{
         collections::{BTreeMap, HashSet},
         net::UdpSocket,
-        sync::{atomic::{AtomicBool, Ordering}, Arc, RwLock},
+        sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, RwLock},
         thread::{self, Builder, JoinHandle},
         time::Duration,
     },
     tokio::sync::mpsc::channel as tokio_channel,
     crossbeam_channel::unbounded as crossbeam_unbounded,
 };
+
 
 pub struct ShredCollectorService {
     thread_hdl: JoinHandle<()>,
@@ -62,6 +68,8 @@ impl ShredCollectorService {
             .name("shredCollector".to_string())
             .spawn(move || {
                 let mut buf = [0u8; 2048];
+
+                debug!("ShredCollectorService::new");
 
                 // Create a minimal validator genesis config
                 let validator_keypair = cluster_info.keypair().clone();
@@ -100,6 +108,32 @@ impl ShredCollectorService {
 
                 accounts.insert(vote_pubkey, vote_account);
 
+                debug!("accounts.insert vote account");
+
+                // Create and add stake account
+                let stake_pubkey = validator_pubkey;
+                let meta = Meta {
+                    rent_exempt_reserve: 0,
+                    authorized: Authorized {
+                        staker: validator_pubkey,
+                        withdrawer: validator_pubkey,
+                    },
+                    lockup: Lockup::default(),
+                };
+
+                let stake_state = StakeStateV2::Initialized(meta);
+
+                let stake_account = Account::from(AccountSharedData::new_data(
+                    validator_stake * 2, // Double the stake amount
+                    &stake_state,
+                    &stake_program::id(),
+                ).unwrap());
+
+                accounts.insert(stake_pubkey, stake_account);
+
+                debug!("accounts.insert stake account");
+                /*
+
                 let genesis_config = GenesisConfig {
                     accounts,
                     fee_rate_governor: FeeRateGovernor::default(),
@@ -113,7 +147,8 @@ impl ShredCollectorService {
                 };
 
                 let runtime_config = Arc::new(RuntimeConfig::default());
-                let bank = Bank::new_with_paths(
+                debug!("Bank::new_with_paths");
+                let bank: Bank = Bank::new_with_paths(
                     &genesis_config,
                     runtime_config,
                     vec![],
@@ -128,8 +163,41 @@ impl ShredCollectorService {
                     Arc::new(AtomicBool::new(false)),
                     None,
                 );
+
+                debug!("Bank::new_with_paths ok");
                 
                 let bank_forks = BankForks::new_rw_arc(bank);
+
+                */
+
+                 // Create genesis config and bank
+        let validator_lamports = 42 * LAMPORTS_PER_SOL;
+
+        let GenesisConfigInfo {
+            genesis_config,
+            mint_keypair: _,
+            voting_keypair: _,
+            validator_pubkey: _,
+        } = create_genesis_config(validator_lamports);
+
+        let bank = Bank::new_with_paths(
+            &genesis_config,
+            Arc::new(solana_runtime::runtime_config::RuntimeConfig::default()),
+            Vec::new(),
+            None,
+            None,
+            AccountSecondaryIndexes::default(),
+            AccountShrinkThreshold::default(),
+            false,
+            None,
+            None,
+            None,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            None,
+        );
+
+        let bank_forks = BankForks::new_rw_arc(bank);
+
                 
                 // Create repair whitelist
                 let repair_whitelist = Arc::new(RwLock::new(HashSet::default()));
@@ -195,6 +263,14 @@ impl ShredCollectorService {
 
                 info!("Starting shred collection from slot {}", start_slot);
 
+                // Create counters for shred statistics
+                let total_shreds = Arc::new(AtomicU64::new(0));
+                let data_shreds = Arc::new(AtomicU64::new(0));
+                let coding_shreds = Arc::new(AtomicU64::new(0));
+                let total_shreds_for_stats = total_shreds.clone();
+                let data_shreds_for_stats = data_shreds.clone();
+                let coding_shreds_for_stats = coding_shreds.clone();
+
                 // Start stats reporting thread
                 let exit_clone = exit.clone();
                 let blockstore_for_stats = blockstore.clone();
@@ -202,6 +278,15 @@ impl ShredCollectorService {
                     .name("repairStats".to_string())
                     .spawn(move || {
                         while !exit_clone.load(Ordering::Relaxed) {
+                            // Report shred statistics
+                            let total = total_shreds_for_stats.load(Ordering::Relaxed);
+                            let data = data_shreds_for_stats.load(Ordering::Relaxed);
+                            let coding = coding_shreds_for_stats.load(Ordering::Relaxed);
+                            info!(
+                                "Shred statistics - Total: {}, Data: {}, Coding: {}",
+                                total, data, coding
+                            );
+
                             // Report processed slots info
                             if let Ok(iter) = blockstore_for_stats.slot_meta_iterator(0) {
                                 let slots_processed = iter.count();
@@ -224,13 +309,22 @@ impl ShredCollectorService {
                     if let Ok((size, addr)) = repair_socket.recv_from(&mut buf) {
                         if let Ok(shred) = Shred::new_from_serialized_shred(buf[..size].to_vec()) {
                             let slot = shred.slot();
+                            let is_data = shred.is_data();
+
+                            // Update counters
+                            total_shreds.fetch_add(1, Ordering::Relaxed);
+                            if is_data {
+                                data_shreds.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                coding_shreds.fetch_add(1, Ordering::Relaxed);
+                            }
 
                             info!(
                                 "Received shred from {}: slot {} index {} type {}",
                                 addr,
                                 slot,
                                 shred.index(),
-                                if shred.is_data() { "data" } else { "coding" }
+                                if is_data { "data" } else { "coding" }
                             );
 
                             if let Err(err) = blockstore.insert_shreds(vec![shred], None, false) {
