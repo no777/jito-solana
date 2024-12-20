@@ -5722,17 +5722,19 @@ name = "shred-collector"
 version = "2.1.0"
 dependencies = [
  "clap 2.34.0",
+ "crossbeam-channel",
  "log",
  "rand 0.7.3",
+ "solana-accounts-db",
  "solana-clap-utils",
  "solana-core",
  "solana-gossip",
+ "solana-ledger",
  "solana-logger",
  "solana-net-utils",
- "solana-perf",
+ "solana-runtime",
  "solana-sdk",
  "solana-streamer",
- "solana-version",
  "tokio",
 ]
 

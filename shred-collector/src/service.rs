@@ -1,35 +1,24 @@
 use {
     log::*,
-    solana_gossip::cluster_info::ClusterInfo,
+    solana_gossip::{
+        cluster_info::{ClusterInfo, Node},
+    },
     solana_ledger::{
         blockstore::Blockstore,
         shred::Shred,
         genesis_utils::create_genesis_config,
     },
     solana_sdk::{
-        clock::{Clock, Slot},
-        signature::Signer,
-        account::{Account, AccountSharedData},
+        clock::Slot,
         native_token::LAMPORTS_PER_SOL,
-        system_program,
         sysvar::epoch_schedule::EpochSchedule,
-        vote::{
-            program as vote_program,
-            state::{VoteInit, VoteState},
-        },
-        stake::{
-            program as stake_program,
-            state::{Meta, StakeStateV2, Authorized, Lockup},
-        },
     },
     solana_runtime::{
         bank::Bank,
         bank_forks::BankForks,
         genesis_utils::GenesisConfigInfo,
-
+        runtime_config::RuntimeConfig,
     },
-  
-
     solana_accounts_db::{
         accounts_index::AccountSecondaryIndexes,
         accounts_db::AccountShrinkThreshold,
@@ -41,7 +30,7 @@ use {
         cluster_slots_service::cluster_slots::ClusterSlots,
     },
     std::{
-        collections::{BTreeMap, HashSet},
+        collections::HashSet,
         net::UdpSocket,
         sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, RwLock},
         thread::{self, Builder, JoinHandle},
@@ -51,13 +40,13 @@ use {
     crossbeam_channel::unbounded as crossbeam_unbounded,
 };
 
-
 pub struct ShredCollectorService {
     thread_hdl: JoinHandle<()>,
 }
 
 impl ShredCollectorService {
     pub fn new(
+        node: Arc<Node>,
         blockstore: Arc<Blockstore>,
         repair_socket: Arc<UdpSocket>,
         cluster_info: Arc<ClusterInfo>,
@@ -71,87 +60,24 @@ impl ShredCollectorService {
 
                 debug!("ShredCollectorService::new");
 
-                // Create a minimal validator genesis config
-                let validator_keypair = cluster_info.keypair().clone();
-                let validator_pubkey = validator_keypair.pubkey();
-                let validator_stake = 42 * LAMPORTS_PER_SOL;
+                // Create genesis config with validator stake
+                let validator_lamports = 42 * LAMPORTS_PER_SOL;
+                debug!("Creating genesis config with {} lamports", validator_lamports);
 
-                let mut accounts = BTreeMap::new();
-                
-                // Add validator stake account
-                accounts.insert(
+                let GenesisConfigInfo {
+                    genesis_config,
+                    mint_keypair: _,
+                    voting_keypair: _,
                     validator_pubkey,
-                    Account::from(AccountSharedData::new(
-                        validator_stake,
-                        0,
-                        &system_program::id(),
-                    )),
-                );
+                } = create_genesis_config(validator_lamports);
 
-                // Create and add vote account
-                let vote_pubkey = validator_pubkey;
-                let vote_state = VoteState::new(
-                    &VoteInit {
-                        node_pubkey: validator_pubkey,
-                        authorized_voter: validator_pubkey,
-                        authorized_withdrawer: validator_pubkey,
-                        commission: 0,
-                    },
-                    &Clock::default(),
-                );
-                
-                let vote_account = Account::from(AccountSharedData::new_data(
-                    validator_stake,
-                    &vote_state,
-                    &vote_program::id(),
-                ).unwrap());
+                debug!("Genesis config created, validator pubkey: {}", validator_pubkey);
 
-                accounts.insert(vote_pubkey, vote_account);
-
-                debug!("accounts.insert vote account");
-
-                // Create and add stake account
-                let stake_pubkey = validator_pubkey;
-                let meta = Meta {
-                    rent_exempt_reserve: 0,
-                    authorized: Authorized {
-                        staker: validator_pubkey,
-                        withdrawer: validator_pubkey,
-                    },
-                    lockup: Lockup::default(),
-                };
-
-                let stake_state = StakeStateV2::Initialized(meta);
-
-                let stake_account = Account::from(AccountSharedData::new_data(
-                    validator_stake * 2, // Double the stake amount
-                    &stake_state,
-                    &stake_program::id(),
-                ).unwrap());
-
-                accounts.insert(stake_pubkey, stake_account);
-
-                debug!("accounts.insert stake account");
-                /*
-
-                let genesis_config = GenesisConfig {
-                    accounts,
-                    fee_rate_governor: FeeRateGovernor::default(),
-                    rent: Rent::default(),
-                    epoch_schedule: EpochSchedule::default(),
-                    ticks_per_slot: 8,
-                    native_instruction_processors: vec![],
-                    rewards_pools: BTreeMap::new(),
-                    poh_config: Default::default(),
-                    ..GenesisConfig::default()
-                };
-
-                let runtime_config = Arc::new(RuntimeConfig::default());
-                debug!("Bank::new_with_paths");
-                let bank: Bank = Bank::new_with_paths(
+                // Create bank with the genesis config
+                let bank = Bank::new_with_paths(
                     &genesis_config,
-                    runtime_config,
-                    vec![],
+                    Arc::new(RuntimeConfig::default()),
+                    Vec::new(),
                     None,
                     None,
                     AccountSecondaryIndexes::default(),
@@ -164,40 +90,9 @@ impl ShredCollectorService {
                     None,
                 );
 
-                debug!("Bank::new_with_paths ok");
+                debug!("Bank created successfully");
                 
                 let bank_forks = BankForks::new_rw_arc(bank);
-
-                */
-
-                 // Create genesis config and bank
-        let validator_lamports = 42 * LAMPORTS_PER_SOL;
-
-        let GenesisConfigInfo {
-            genesis_config,
-            mint_keypair: _,
-            voting_keypair: _,
-            validator_pubkey: _,
-        } = create_genesis_config(validator_lamports);
-
-        let bank = Bank::new_with_paths(
-            &genesis_config,
-            Arc::new(solana_runtime::runtime_config::RuntimeConfig::default()),
-            Vec::new(),
-            None,
-            None,
-            AccountSecondaryIndexes::default(),
-            AccountShrinkThreshold::default(),
-            false,
-            None,
-            None,
-            None,
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            None,
-        );
-
-        let bank_forks = BankForks::new_rw_arc(bank);
-
                 
                 // Create repair whitelist
                 let repair_whitelist = Arc::new(RwLock::new(HashSet::default()));
@@ -227,6 +122,10 @@ impl ShredCollectorService {
                 // Create cluster slots
                 let cluster_slots = Arc::new(ClusterSlots::default());
 
+                // Initialize repair slots with start_slot
+                let repair_slots = vec![start_slot];
+                let wen_restart_repair_slots = Arc::new(RwLock::new(repair_slots));
+
                 // Create RepairInfo
                 let repair_info = RepairInfo {
                     bank_forks,
@@ -236,12 +135,12 @@ impl ShredCollectorService {
                     repair_validators: None,
                     repair_whitelist,
                     ancestor_duplicate_slots_sender,
-                    wen_restart_repair_slots: Some(Arc::new(RwLock::new(vec![]))),
+                    wen_restart_repair_slots: Some(wen_restart_repair_slots),
                 };
 
-                // Create ancestor hashes socket
-                let ancestor_hashes_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap_or_else(|e| {
-                    eprintln!("Failed to bind ancestor hashes socket: {}", e);
+                // Get ancestor hashes socket from node
+                let ancestor_hashes_socket = Arc::new(node.sockets.ancestor_hashes_requests.try_clone().unwrap_or_else(|e| {
+                    error!("Failed to clone ancestor hashes socket: {}", e);
                     std::process::exit(1);
                 }));
 

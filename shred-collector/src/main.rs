@@ -192,11 +192,18 @@ fn main() {
     );
 
     // Remove unused ports since we only need gossip and repair
-    node.info.remove_tpu();
-    node.info.remove_tpu_forwards();
-    node.info.remove_tvu();
-    node.info.remove_serve_repair();
-    node.sockets.ip_echo = None;
+    // node.info.remove_tpu();
+    // node.info.remove_tpu_forwards();
+    // node.info.remove_tvu();
+    // node.info.remove_serve_repair();
+    // node.sockets.ip_echo = None;
+
+    // Get the gossip socket before wrapping node in Arc
+    let gossip_socket = node.sockets.gossip.try_clone().unwrap_or_else(|e| {
+        error!("Failed to clone gossip socket: {}", e);
+        std::process::exit(1);
+    });
+    let node = Arc::new(node);
 
     let cluster_info = Arc::new(ClusterInfo::new(
         node.info.clone(),
@@ -218,7 +225,7 @@ fn main() {
     let _gossip_service = GossipService::new(
         &cluster_info,
         None,
-        node.sockets.gossip,
+        gossip_socket,
         None,
         true,
         None,
@@ -249,6 +256,7 @@ fn main() {
     );
 
     let shred_collector = ShredCollectorService::new(
+        node.clone(),
         blockstore,
         repair_socket,
         cluster_info,
