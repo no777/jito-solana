@@ -340,6 +340,8 @@ impl RepairService {
             let repairs = {
                 let new_root = root_bank.slot();
 
+                debug!("new root: {}", new_root);
+
                 // Purge outdated slots from the weighting heuristic
                 set_root_elapsed = Measure::start("set_root_elapsed");
                 repair_weight.set_root(new_root);
@@ -417,6 +419,8 @@ impl RepairService {
                         &mut best_repairs_stats,
                     ),
                 };
+
+                debug!("repaires: {:#?}", repairs);
 
                 let mut popular_pruned_forks = repair_weight.get_popular_pruned_forks(
                     root_bank.epoch_stakes_map(),

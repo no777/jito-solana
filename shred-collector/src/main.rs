@@ -192,11 +192,11 @@ fn main() {
     );
 
     // Remove unused ports since we only need gossip and repair
-    // node.info.remove_tpu();
-    // node.info.remove_tpu_forwards();
-    // node.info.remove_tvu();
-    // node.info.remove_serve_repair();
-    // node.sockets.ip_echo = None;
+    node.info.remove_tpu();
+    node.info.remove_tpu_forwards();
+    node.info.remove_tvu();
+    node.info.remove_serve_repair();
+    node.sockets.ip_echo = None;
 
     // Get the gossip socket before wrapping node in Arc
     let gossip_socket = node.sockets.gossip.try_clone().unwrap_or_else(|e| {
@@ -234,10 +234,13 @@ fn main() {
 
     info!("Gossip Service started on port {}", gossip_addr.port());
 
-    let repair_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap_or_else(|err| {
-        eprintln!("Failed to bind repair socket: {}", err);
-        process::exit(1);
-    }));
+
+    let repair_socket =  node.sockets.repair.try_clone().unwrap();
+    let repair_socket = Arc::new(repair_socket);
+    // let repair_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap_or_else(|err| {
+    //     eprintln!("Failed to bind repair socket: {}", err);
+    //     process::exit(1);
+    // }));
 
     let blockstore = Arc::new(
         Blockstore::open_with_options(

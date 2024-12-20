@@ -38,6 +38,7 @@ use {
     },
     tokio::sync::mpsc::channel as tokio_channel,
     crossbeam_channel::unbounded as crossbeam_unbounded,
+    rand::thread_rng,
 };
 
 pub struct ShredCollectorService {
@@ -130,12 +131,12 @@ impl ShredCollectorService {
                 let repair_info = RepairInfo {
                     bank_forks,
                     cluster_info: cluster_info.clone(),
-                    cluster_slots,
+                    cluster_slots: cluster_slots.clone(),
                     epoch_schedule: EpochSchedule::default(),
                     repair_validators: None,
                     repair_whitelist,
                     ancestor_duplicate_slots_sender,
-                    wen_restart_repair_slots: Some(wen_restart_repair_slots),
+                    wen_restart_repair_slots: Some(wen_restart_repair_slots.clone()),
                 };
 
                 // Get ancestor hashes socket from node
@@ -159,79 +160,82 @@ impl ShredCollectorService {
                     dumped_slots_receiver,
                     popular_pruned_forks_sender,
                 );
+                
 
                 info!("Starting shred collection from slot {}", start_slot);
 
-                // Create counters for shred statistics
-                let total_shreds = Arc::new(AtomicU64::new(0));
-                let data_shreds = Arc::new(AtomicU64::new(0));
-                let coding_shreds = Arc::new(AtomicU64::new(0));
-                let total_shreds_for_stats = total_shreds.clone();
-                let data_shreds_for_stats = data_shreds.clone();
-                let coding_shreds_for_stats = coding_shreds.clone();
+                debug!("cluster_info repair_peers: {:#?}", cluster_info.repair_peers(start_slot));
+
+                // // Create counters for shred statistics
+                // let total_shreds = Arc::new(AtomicU64::new(0));
+                // let data_shreds = Arc::new(AtomicU64::new(0));
+                // let coding_shreds = Arc::new(AtomicU64::new(0));
+                // let total_shreds_for_stats = total_shreds.clone();
+                // let data_shreds_for_stats = data_shreds.clone();
+                // let coding_shreds_for_stats = coding_shreds.clone();
 
                 // Start stats reporting thread
-                let exit_clone = exit.clone();
-                let blockstore_for_stats = blockstore.clone();
-                let _stats_thread = Builder::new()
-                    .name("repairStats".to_string())
-                    .spawn(move || {
-                        while !exit_clone.load(Ordering::Relaxed) {
-                            // Report shred statistics
-                            let total = total_shreds_for_stats.load(Ordering::Relaxed);
-                            let data = data_shreds_for_stats.load(Ordering::Relaxed);
-                            let coding = coding_shreds_for_stats.load(Ordering::Relaxed);
-                            info!(
-                                "Shred statistics - Total: {}, Data: {}, Coding: {}",
-                                total, data, coding
-                            );
+                // let exit_clone = exit.clone();
+                // let blockstore_for_stats = blockstore.clone();
+                // let _stats_thread = Builder::new()
+                //     .name("repairStats".to_string())
+                //     .spawn(move || {
+                //         while !exit_clone.load(Ordering::Relaxed) {
+                //             // Report shred statistics
+                //             let total = total_shreds_for_stats.load(Ordering::Relaxed);
+                //             let data = data_shreds_for_stats.load(Ordering::Relaxed);
+                //             let coding = coding_shreds_for_stats.load(Ordering::Relaxed);
+                //             info!(
+                //                 "Shred statistics - Total: {}, Data: {}, Coding: {}",
+                //                 total, data, coding
+                //             );
 
-                            // Report processed slots info
-                            if let Ok(iter) = blockstore_for_stats.slot_meta_iterator(0) {
-                                let slots_processed = iter.count();
-                                info!("Total slots processed: {}", slots_processed);
-                            } else {
-                                warn!("Failed to read slot meta iterator");
-                            }
+                //             // Report processed slots info
+                //             if let Ok(iter) = blockstore_for_stats.slot_meta_iterator(0) {
+                //                 let slots_processed = iter.count();
+                //                 info!("Total slots processed: {}", slots_processed);
+                //             } else {
+                //                 warn!("Failed to read slot meta iterator");
+                //             }
 
-                            thread::sleep(Duration::from_secs(5));
-                        }
-                    })
-                    .unwrap();
+                //             thread::sleep(Duration::from_secs(5));
+                //         }
+                //     })
+                //     .unwrap();
 
-                loop {
-                    if exit.load(Ordering::Relaxed) {
-                        break;
-                    }
+                // loop {
+                //     if exit.load(Ordering::Relaxed) {
+                //         break;
+                //     }
 
-                    // Receive shreds
-                    if let Ok((size, addr)) = repair_socket.recv_from(&mut buf) {
-                        if let Ok(shred) = Shred::new_from_serialized_shred(buf[..size].to_vec()) {
-                            let slot = shred.slot();
-                            let is_data = shred.is_data();
+                //     // Receive shreds
+                //     if let Ok((size, addr)) = repair_socket.recv_from(&mut buf) {
+                //         if let Ok(shred) = Shred::new_from_serialized_shred(buf[..size].to_vec()) {
+                //             let slot = shred.slot();
+                //             let is_data = shred.is_data();
 
-                            // Update counters
-                            total_shreds.fetch_add(1, Ordering::Relaxed);
-                            if is_data {
-                                data_shreds.fetch_add(1, Ordering::Relaxed);
-                            } else {
-                                coding_shreds.fetch_add(1, Ordering::Relaxed);
-                            }
+                //             // Update counters
+                //             total_shreds.fetch_add(1, Ordering::Relaxed);
+                //             if is_data {
+                //                 data_shreds.fetch_add(1, Ordering::Relaxed);
+                //             } else {
+                //                 coding_shreds.fetch_add(1, Ordering::Relaxed);
+                //             }
 
-                            info!(
-                                "Received shred from {}: slot {} index {} type {}",
-                                addr,
-                                slot,
-                                shred.index(),
-                                if is_data { "data" } else { "coding" }
-                            );
+                //             info!(
+                //                 "Received shred from {}: slot {} index {} type {}",
+                //                 addr,
+                //                 slot,
+                //                 shred.index(),
+                //                 if is_data { "data" } else { "coding" }
+                //             );
 
-                            if let Err(err) = blockstore.insert_shreds(vec![shred], None, false) {
-                                warn!("Failed to insert shred: {:?}", err);
-                            }
-                        }
-                    }
-                }
+                //             if let Err(err) = blockstore.insert_shreds(vec![shred], None, false) {
+                //                 warn!("Failed to insert shred: {:?}", err);
+                //             }
+                //         }
+                //     }
+                // }
             })
             .unwrap();
 

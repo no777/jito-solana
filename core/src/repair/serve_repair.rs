@@ -1064,18 +1064,27 @@ impl ServeRepair {
         // find a peer that appears to be accepting replication and has the desired slot, as indicated
         // by a valid tvu port location
         let slot = repair_request.slot();
+
+        debug!("repair request: {:#?}", repair_request);
+
         let repair_peers = match peers_cache.get(&slot) {
             Some(entry) if entry.asof.elapsed() < REPAIR_PEERS_CACHE_TTL => entry,
             _ => {
                 peers_cache.pop(&slot);
                 let repair_peers = self.repair_peers(repair_validators, slot);
+                debug!("repair_peers: {:#?} repair_validators: {:#?}    ", repair_peers.len(),repair_validators);
+
                 let weights = cluster_slots.compute_weights(slot, &repair_peers);
                 let repair_peers = RepairPeers::new(Instant::now(), &repair_peers, &weights)?;
                 peers_cache.put(slot, repair_peers);
                 peers_cache.get(&slot).unwrap()
             }
         };
-        let peer = repair_peers.sample(&mut rand::thread_rng());
+
+        debug!("cached repair_peers: {:#?}", repair_peers.peers.len());
+        let peer: &Node = repair_peers.sample(&mut rand::thread_rng());
+
+        debug!("repair request: {:#?} peer: {:#?}", repair_request, peer.serve_repair);
         let nonce = outstanding_requests.add_request(repair_request, timestamp());
         let out = self.map_repair_request(
             &repair_request,
