@@ -1,3 +1,5 @@
+mod service;
+
 use {
     clap::{crate_description, crate_name, value_t, values_t_or_exit, App, Arg},
     log::*,
@@ -8,32 +10,45 @@ use {
     },
     solana_gossip::{
         cluster_info::{ClusterInfo, Node},
-        gossip_service::GossipService,
         contact_info::ContactInfo,
+        gossip_service::GossipService,
     },
-    solana_net_utils::{VALIDATOR_PORT_RANGE, get_public_ip_addr, parse_host},
+    solana_ledger::{
+        blockstore::Blockstore,
+        blockstore_options::{
+            AccessType, BlockstoreOptions, BlockstoreRecoveryMode, LedgerColumnOptions,
+        },
+    },
+    solana_net_utils::{
+        VALIDATOR_PORT_RANGE, parse_host, parse_port_or_addr, get_public_ip_addr,
+    },
     solana_sdk::{
         pubkey::Pubkey,
         signature::Signer,
+        clock::Slot,
     },
     solana_streamer::socket::SocketAddrSpace,
+    service::ShredCollectorService,
     std::{
-        net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
-        process::exit,
-        sync::{atomic::AtomicBool, Arc},
+        net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket, ToSocketAddrs},
+        path::PathBuf,
+        process,
+        sync::{atomic::{AtomicBool, Ordering}, Arc},
         thread::sleep,
         time::Duration,
     },
 };
 
 fn parse_entrypoint(entrypoint: &str) -> SocketAddr {
-    if let Ok(addr) = entrypoint.to_socket_addrs() {
-        if let Some(addr) = addr.filter(|addr| addr.port() != 0).next() {
+    if let Ok(mut addrs) = entrypoint.to_socket_addrs() {
+        if let Some(addr) = addrs.next() {
             return addr;
         }
     }
-    eprintln!("Failed to parse entrypoint address: {}", entrypoint);
-    exit(1);
+    
+    // Fallback to default parsing if DNS resolution fails
+    let default_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), VALIDATOR_PORT_RANGE.0);
+    parse_port_or_addr(Some(entrypoint), default_addr)
 }
 
 fn main() {
@@ -41,7 +56,7 @@ fn main() {
 
     let matches = App::new(crate_name!())
         .about(crate_description!())
-        .version(solana_version::version!())
+        .version("1.0.0")
         .arg(
             Arg::with_name("identity")
                 .short("i")
@@ -49,7 +64,7 @@ fn main() {
                 .value_name("PATH")
                 .takes_value(true)
                 .validator(is_keypair)
-                .help("Path to validator identity keypair"),
+                .help("File containing the identity keypair"),
         )
         .arg(
             Arg::with_name("gossip_port")
@@ -57,32 +72,54 @@ fn main() {
                 .value_name("PORT")
                 .takes_value(true)
                 .validator(is_port)
-                .help("Gossip port number"),
+                .help("Gossip port number for the validator"),
         )
         .arg(
             Arg::with_name("gossip_host")
                 .long("gossip-host")
                 .value_name("HOST")
                 .takes_value(true)
-                .help("Gossip DNS name or IP address for the node to advertise in gossip"),
+                .help("Gossip DNS name or IP address for the validator to advertise in gossip"),
         )
         .arg(
             Arg::with_name("entrypoint")
-                .short("n")
                 .long("entrypoint")
                 .value_name("HOST:PORT")
                 .takes_value(true)
                 .multiple(true)
-                .help("Rendezvous with the cluster at this gossip entrypoint"),
+                .help("Rendezvous with the cluster at this entry point"),
+        )
+        .arg(
+            Arg::with_name("ledger_path")
+                .long("ledger")
+                .value_name("DIR")
+                .takes_value(true)
+                .required(true)
+                .help("Use DIR as ledger location"),
+        )
+        .arg(
+            Arg::with_name("start_slot")
+                .long("start-slot")
+                .value_name("SLOT")
+                .takes_value(true)
+                .required(true)
+                .help("Start collecting shreds from this slot"),
         )
         .get_matches();
 
+    let start_slot = value_t!(matches, "start_slot", Slot).unwrap_or_else(|e| {
+        eprintln!("error: {:?}", e);
+        process::exit(1);
+    });
+
+    let ledger_path = PathBuf::from(value_t!(matches, "ledger_path", String).unwrap_or_else(|e| {
+        eprintln!("error: {:?}", e);
+        process::exit(1);
+    }));
+
     let identity_keypair = keypair_of(&matches, "identity").unwrap_or_else(|| {
-        clap::Error::with_description(
-            "The --identity <KEYPAIR> argument is required",
-            clap::ErrorKind::ArgumentNotFound,
-        )
-        .exit();
+        eprintln!("The --identity <PATH> argument is required");
+        process::exit(1);
     });
 
     let bind_address = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
@@ -99,7 +136,7 @@ fn main() {
         .map(|gossip_host| {
             parse_host(gossip_host).unwrap_or_else(|err| {
                 eprintln!("Failed to parse --gossip-host: {err}");
-                exit(1);
+                process::exit(1);
             })
         })
         .unwrap_or_else(|| {
@@ -125,11 +162,11 @@ fn main() {
                 });
 
                 gossip_host.unwrap_or_else(|| {
-                    eprintln!("Unable to determine the validator's public IP address");
-                    exit(1);
+                    info!("Unable to determine public IP, using local IP");
+                    bind_address
                 })
             } else {
-                IpAddr::V4(Ipv4Addr::LOCALHOST)
+                bind_address
             }
         });
 
@@ -139,7 +176,7 @@ fn main() {
             solana_net_utils::find_available_port_in_range(bind_address, (0, 1)).unwrap_or_else(
                 |err| {
                     eprintln!("Unable to find an available gossip port: {err}");
-                    exit(1);
+                    process::exit(1);
                 },
             )
         }),
@@ -189,14 +226,45 @@ fn main() {
     );
 
     info!("Gossip Service started on port {}", gossip_addr.port());
-    info!("Node identity: {}", node.info.pubkey());
+
+    let repair_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap_or_else(|err| {
+        eprintln!("Failed to bind repair socket: {}", err);
+        process::exit(1);
+    }));
+
+    let blockstore = Arc::new(
+        Blockstore::open_with_options(
+            &ledger_path,
+            BlockstoreOptions {
+                access_type: AccessType::Primary,
+                recovery_mode: Some(BlockstoreRecoveryMode::TolerateCorruptedTailRecords),
+                enforce_ulimit_nofile: false,
+                column_options: LedgerColumnOptions::default(),
+            },
+        )
+        .unwrap_or_else(|err| {
+            eprintln!("Failed to open ledger at {:?}: {:?}", ledger_path, err);
+            process::exit(1);
+        }),
+    );
+
+    let shred_collector = ShredCollectorService::new(
+        blockstore,
+        repair_socket,
+        cluster_info,
+        start_slot,
+        exit.clone(),
+    );
+
+    info!("Started shred collector service");
 
     loop {
-        let nodes = cluster_info.all_peers();
-        info!("Connected to {} peers", nodes.len());
-        for (node, _) in nodes {
-            info!("Peer: {}", node.pubkey());
+        if exit.load(Ordering::Relaxed) {
+            break;
         }
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_millis(100));
     }
+
+    exit.store(true, Ordering::Relaxed);
+    shred_collector.join().unwrap();
 }

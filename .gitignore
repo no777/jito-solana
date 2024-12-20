@@ -38,3 +38,4 @@ log-*/
 
 .env
 docker-output/
+ledger-data
