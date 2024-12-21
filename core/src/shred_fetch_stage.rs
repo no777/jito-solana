@@ -31,7 +31,7 @@ use {
 
 const PACKET_COALESCE_DURATION: Duration = Duration::from_millis(1);
 
-pub(crate) struct ShredFetchStage {
+pub struct ShredFetchStage {
     thread_hdls: Vec<JoinHandle<()>>,
 }
 
@@ -70,6 +70,7 @@ impl ShredFetchStage {
                 bank_forks_r.highest_slot(),
             )
         };
+        debug!("last_root: {} last_slot: {} ",last_root, last_slot);
         let mut stats = ShredFetchStats::default();
         let cluster_type = {
             let root_bank = bank_forks.read().unwrap().root_bank();
@@ -77,6 +78,8 @@ impl ShredFetchStage {
         };
 
         for mut packet_batch in recvr {
+            debug!("packet_batch: {} ",packet_batch.len());
+       
             if last_updated.elapsed().as_millis() as u64 > DEFAULT_MS_PER_SLOT {
                 last_updated = Instant::now();
                 let root_bank = {
@@ -198,7 +201,7 @@ impl ShredFetchStage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub fn new(
         sockets: Vec<Arc<UdpSocket>>,
         turbine_quic_endpoint_receiver: Receiver<(Pubkey, SocketAddr, Bytes)>,
         repair_socket: Arc<UdpSocket>,

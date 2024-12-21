@@ -244,10 +244,14 @@ fn main() {
 
     let repair_socket =  node.sockets.repair.try_clone().unwrap();
     let repair_socket = Arc::new(repair_socket);
-    // let repair_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap_or_else(|err| {
-    //     eprintln!("Failed to bind repair socket: {}", err);
-    //     process::exit(1);
-    // }));
+
+    // Clone TVU sockets
+    let fetch_sockets: Vec<UdpSocket> = node
+        .sockets
+        .tvu
+        .iter()
+        .map(|socket| socket.try_clone().unwrap())
+        .collect();
 
     let blockstore = Arc::new(
         Blockstore::open_with_options(
@@ -270,6 +274,7 @@ fn main() {
         node.clone(),
         blockstore,
         repair_socket,
+        fetch_sockets,
         cluster_info,
         start_slot,
         exit.clone(),

@@ -36,7 +36,7 @@ pub mod replay_stage;
 mod result;
 pub mod rewards_recorder_service;
 pub mod sample_performance_service;
-mod shred_fetch_stage;
+pub mod shred_fetch_stage;
 pub mod sigverify;
 pub mod sigverify_stage;
 pub mod snapshot_packager_service;

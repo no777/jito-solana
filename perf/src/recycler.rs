@@ -187,7 +187,7 @@ impl<T: Default + Reset> RecyclerX<T> {
         let total = self.stats.total.load(Ordering::Relaxed);
         let reuse = self.stats.reuse.load(Ordering::Relaxed);
         let freed = self.stats.freed.load(Ordering::Relaxed);
-        datapoint_debug!(
+        datapoint_trace!(
             "recycler",
             ("gc_len", len as i64, i64),
             ("total", total as i64, i64),

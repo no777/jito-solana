@@ -24,7 +24,9 @@ use {
         accounts_db::AccountShrinkThreshold,
     },
     solana_core::{
+        shred_fetch_stage::ShredFetchStage,
         repair::{
+            
             repair_service::{RepairService, RepairInfo, OutstandingShredRepairs},
         },
         cluster_slots_service::cluster_slots::ClusterSlots,
@@ -50,6 +52,7 @@ impl ShredCollectorService {
         node: Arc<Node>,
         blockstore: Arc<Blockstore>,
         repair_socket: Arc<UdpSocket>,
+        fetch_sockets:Vec<UdpSocket>,
         cluster_info: Arc<ClusterInfo>,
         start_slot: Slot,
         exit: Arc<AtomicBool>,
@@ -100,8 +103,8 @@ impl ShredCollectorService {
 
                 // Create channels for QUIC endpoint
                 // let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio_channel(128);
-                let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio::sync::mpsc::channel(1);
-                let (quic_endpoint_response_sender, _quic_endpoint_response_receiver) = crossbeam_unbounded();
+                let (quic_endpoint_sender, quic_endpoint_receiver) = tokio::sync::mpsc::channel(1);
+                let (quic_endpoint_response_sender, quic_endpoint_response_receiver) = crossbeam_unbounded();
 
                 // Create verified vote receiver channel
                 let (_verified_vote_sender, verified_vote_receiver) = crossbeam_unbounded();
@@ -176,6 +179,29 @@ impl ShredCollectorService {
                 info!("Starting shred collection from slot {}", start_slot);
 
                 debug!("cluster_info repair_peers: {:#?}", cluster_info.repair_peers(start_slot));
+                // let fetch_sockets: Vec<UdpSocket> = node.sockets.tvu;
+                // let fetch_sockets: Vec<UdpSocket> = node.sockets.tvu.try_clone().unwrap();
+
+                let fetch_sockets: Vec<Arc<UdpSocket>> = fetch_sockets.into_iter().map(Arc::new).collect();
+        
+                // let repair_socket = Arc::new(repair_socket);
+                let (fetch_sender, fetch_receiver) = crossbeam_unbounded();
+                let (turbine_quic_endpoint_sender, turbine_quic_endpoint_receiver) = crossbeam_unbounded();
+                
+                let turbine_disabled = Arc::new(AtomicBool::new(false));
+
+                let fetch_stage = ShredFetchStage::new(
+                    fetch_sockets,
+                    turbine_quic_endpoint_receiver,
+                    repair_socket.clone(),
+                    quic_endpoint_response_receiver,
+                    fetch_sender,
+                    50093,
+                    bank_forks.clone(),
+                    cluster_info.clone(),
+                    turbine_disabled,
+                    exit.clone(),
+                );
 
                 // // Create counters for shred statistics
                 // let total_shreds = Arc::new(AtomicU64::new(0));
