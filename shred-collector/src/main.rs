@@ -187,12 +187,14 @@ fn main() {
 
     // const MY_VALIDATOR_PORT_RANGE = (10010, 10020);
 
-    let  node = Node::new_single_bind(
+    let mut node = Node::new_single_bind(
         &identity_keypair.pubkey(),
         &gossip_addr,
         (gossip_addr.port(), gossip_addr.port() + 100),
         bind_address,
     );
+
+    node.info.set_shred_version(50093);
 
 
     // Remove unused ports since we only need gossip and repair

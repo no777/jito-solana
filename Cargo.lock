@@ -5732,6 +5732,8 @@ dependencies = [
  "solana-ledger",
  "solana-logger",
  "solana-net-utils",
+ "solana-poh",
+ "solana-rpc",
  "solana-runtime",
  "solana-sdk",
  "solana-streamer",

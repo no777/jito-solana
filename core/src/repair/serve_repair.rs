@@ -1109,6 +1109,7 @@ impl ServeRepair {
                     num_expected_responses,
                     response_sender: quic_endpoint_response_sender.clone(),
                 };
+                debug!("quic_endpoint_sender: {:?}", peer.serve_repair_quic);
                 quic_endpoint_sender
                     .blocking_send(request)
                     .map_err(|_| Error::SendError)
