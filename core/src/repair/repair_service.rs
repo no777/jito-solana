@@ -42,6 +42,7 @@ use {
     },
     solana_streamer::sendmmsg::{batch_send, SendPktsError},
     std::{
+        time,
         collections::{HashMap, HashSet},
         iter::Iterator,
         net::{SocketAddr, UdpSocket},
@@ -340,7 +341,7 @@ impl RepairService {
             let repairs = {
                 let new_root = root_bank.slot();
 
-                debug!("new root: {}", new_root);
+                trace!("new root: {}", new_root);
 
                 // Purge outdated slots from the weighting heuristic
                 set_root_elapsed = Measure::start("set_root_elapsed");
@@ -420,7 +421,7 @@ impl RepairService {
                     ),
                 };
 
-                debug!("repaires: {:#?}", repairs);
+                trace!("repaires: {:#?}", repairs);
 
                 let mut popular_pruned_forks = repair_weight.get_popular_pruned_forks(
                     root_bank.epoch_stakes_map(),
@@ -480,7 +481,10 @@ impl RepairService {
             build_repairs_batch_elapsed.stop();
 
             let mut batch_send_repairs_elapsed = Measure::start("batch_send_repairs_elapsed");
+            
             if !batch.is_empty() {
+                // Add a small delay before sending
+                thread::sleep(time::Duration::from_millis(1));
                 match batch_send(repair_socket, &batch) {
                     Ok(()) => (),
                     Err(SendPktsError::IoError(err, num_failed)) => {

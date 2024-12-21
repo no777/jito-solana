@@ -36,14 +36,25 @@ where
     S: Borrow<SocketAddr>,
     T: AsRef<[u8]>,
 {
+
+    
     let mut num_failed = 0;
     let mut erropt = None;
     for (p, a) in packets {
+
+        trace!("batch_send {} to addr {} from addr {}", p.as_ref().len(),a.borrow(), sock.local_addr().unwrap());
+        // trace!("packet content: {:?}", &p.as_ref()[..std::cmp::min(p.as_ref().len(), 32)]);
+
+
+
         if let Err(e) = sock.send_to(p.as_ref(), a.borrow()) {
+            error!("Failed to send packet: {:?}", e);
             num_failed += 1;
             if erropt.is_none() {
                 erropt = Some(e);
             }
+        } else {
+            trace!("Successfully sent packet to {}", a.borrow());
         }
     }
 

@@ -1065,14 +1065,14 @@ impl ServeRepair {
         // by a valid tvu port location
         let slot = repair_request.slot();
 
-        debug!("repair request: {:#?}", repair_request);
+        trace!("repair request: {:#?}", repair_request);
 
         let repair_peers = match peers_cache.get(&slot) {
             Some(entry) if entry.asof.elapsed() < REPAIR_PEERS_CACHE_TTL => entry,
             _ => {
                 peers_cache.pop(&slot);
                 let repair_peers = self.repair_peers(repair_validators, slot);
-                debug!("repair_peers: {:#?} repair_validators: {:#?}    ", repair_peers.len(),repair_validators);
+                trace!("repair_peers: {:#?} repair_validators: {:#?}    ", repair_peers.len(),repair_validators);
 
                 let weights = cluster_slots.compute_weights(slot, &repair_peers);
                 let repair_peers = RepairPeers::new(Instant::now(), &repair_peers, &weights)?;
@@ -1081,10 +1081,10 @@ impl ServeRepair {
             }
         };
 
-        debug!("cached repair_peers: {:#?}", repair_peers.peers.len());
+        trace!("cached repair_peers: {:#?}", repair_peers.peers.len());
         let peer: &Node = repair_peers.sample(&mut rand::thread_rng());
 
-        debug!("repair request: {:#?} peer: {:#?}", repair_request, peer.serve_repair);
+        trace!("repair request: {:#?} peer: {:#?}", repair_request, peer.serve_repair);
         let nonce = outstanding_requests.add_request(repair_request, timestamp());
         let out = self.map_repair_request(
             &repair_request,
@@ -1093,11 +1093,12 @@ impl ServeRepair {
             nonce,
             identity_keypair,
         )?;
-        debug!(
+        trace!(
             "Sending repair request from {} for {:#?}",
             identity_keypair.pubkey(),
             repair_request
         );
+
         match repair_protocol {
             Protocol::UDP => Ok(Some((peer.serve_repair, out))),
             Protocol::QUIC => {

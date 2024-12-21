@@ -31,7 +31,7 @@ use {
     solana_streamer::socket::SocketAddrSpace,
     service::ShredCollectorService,
     std::{
-        net::{IpAddr, Ipv4Addr, SocketAddr,  ToSocketAddrs},
+        net::{IpAddr, Ipv4Addr, SocketAddr,  ToSocketAddrs,UdpSocket},
         path::PathBuf,
         process,
         sync::{atomic::{AtomicBool, Ordering}, Arc},
@@ -240,6 +240,7 @@ fn main() {
 
     info!("Gossip Service started on port {}", gossip_addr.port());
 
+    // let repair_socket = Arc::new(node.sockets.repair);
 
     let repair_socket =  node.sockets.repair.try_clone().unwrap();
     let repair_socket = Arc::new(repair_socket);
