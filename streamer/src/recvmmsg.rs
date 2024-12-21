@@ -18,6 +18,8 @@ use {
 
 #[cfg(not(target_os = "linux"))]
 pub fn recv_mmsg(socket: &UdpSocket, packets: &mut [Packet]) -> io::Result</*num packets:*/ usize> {
+    trace!("recv_from() to {}",socket.local_addr().unwrap()); 
+                
     debug_assert!(packets.iter().all(|pkt| pkt.meta() == &Meta::default()));
     let mut i = 0;
     let count = cmp::min(NUM_RCVMMSGS, packets.len());
@@ -25,12 +27,15 @@ pub fn recv_mmsg(socket: &UdpSocket, packets: &mut [Packet]) -> io::Result</*num
         p.meta_mut().size = 0;
         match socket.recv_from(p.buffer_mut()) {
             Err(_) if i > 0 => {
+                trace!("recv_from() failed after receiving {} packets to {}", i,socket.local_addr().unwrap()); 
                 break;
             }
             Err(e) => {
+                trace!("recv_from() error {} packets to {}", e,socket.local_addr().unwrap()); 
                 return Err(e);
             }
             Ok((nrecv, from)) => {
+                trace!("recv_from() received {} bytes from {} to {}",nrecv, from,socket.local_addr().unwrap());   
                 p.meta_mut().size = nrecv;
                 p.meta_mut().set_socket_addr(&from);
                 if i == 0 {

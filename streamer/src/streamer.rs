@@ -131,7 +131,7 @@ fn recv_loop(
                     continue;
                 }
             }
-
+            trace!("recv_loop at {}",socket.local_addr().unwrap());   
             if let Ok(len) = packet::recv_from(&mut packet_batch, socket, coalesce) {
                 if len > 0 {
                     let StreamerReceiveStats {
@@ -142,6 +142,8 @@ fn recv_loop(
                         ..
                     } = stats;
 
+                    trace!("received {} packets from socket {:?}", len, socket);
+
                     packets_count.fetch_add(len, Ordering::Relaxed);
                     packet_batches_count.fetch_add(1, Ordering::Relaxed);
                     max_channel_len.fetch_max(packet_batch_sender.len(), Ordering::Relaxed);
@@ -151,6 +153,8 @@ fn recv_loop(
                     packet_batch
                         .iter_mut()
                         .for_each(|p| p.meta_mut().set_from_staked_node(is_staked_service));
+                    trace!("packet_batch_sender  {:?}", packet_batch.len());
+
                     packet_batch_sender.send(packet_batch)?;
                 }
                 break;

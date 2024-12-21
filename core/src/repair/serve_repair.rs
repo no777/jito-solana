@@ -425,6 +425,7 @@ impl ServeRepair {
     ) -> Option<PacketBatch> {
         let now = Instant::now();
         let (res, label) = {
+            debug!("handle_repair: {:?} from_addr: {:?}", request, from_addr);
             match &request {
                 RepairProtocol::WindowIndex {
                     header: RepairRequestHeader { nonce, .. },

@@ -161,7 +161,8 @@ impl ShredFetchStage {
         turbine_disabled: Arc<AtomicBool>,
     ) -> (Vec<JoinHandle<()>>, JoinHandle<()>) {
         let (packet_sender, packet_receiver) = unbounded();
-        let streamers = sockets
+        let socket_addrs: Vec<_> = sockets.iter().map(|socket| socket.local_addr().unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)))).collect();
+        let streamers: Vec<JoinHandle<()>> = sockets
             .into_iter()
             .enumerate()
             .map(|(i, socket)| {
@@ -179,6 +180,8 @@ impl ShredFetchStage {
                 )
             })
             .collect();
+    
+        debug!("streamers: {} sockets: {:?}", streamers.len(), socket_addrs);
         let modifier_hdl = Builder::new()
             .name(modifier_thread_name.to_string())
             .spawn(move || {

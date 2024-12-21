@@ -41,11 +41,16 @@ use {
     tokio::sync::mpsc::channel as tokio_channel,
     crossbeam_channel::unbounded as crossbeam_unbounded,
     rand::thread_rng,
+
+    solana_streamer::streamer::{self, PacketBatchReceiver, StreamerReceiveStats},
+    solana_perf::packet::{PacketBatch, PacketBatchRecycler, PacketFlags, PACKETS_PER_BATCH},
+
 };
 
 pub struct ShredCollectorService {
     thread_hdl: JoinHandle<()>,
 }
+const PACKET_COALESCE_DURATION: Duration = Duration::from_millis(1);
 
 impl ShredCollectorService {
     pub fn new(
@@ -185,94 +190,82 @@ impl ShredCollectorService {
                 let fetch_sockets: Vec<Arc<UdpSocket>> = fetch_sockets.into_iter().map(Arc::new).collect();
         
                 // let repair_socket = Arc::new(repair_socket);
-                let (fetch_sender, fetch_receiver) = crossbeam_unbounded();
-                let (turbine_quic_endpoint_sender, turbine_quic_endpoint_receiver) = crossbeam_unbounded();
+                // let (fetch_sender, fetch_receiver) = crossbeam_unbounded();
+                // let (turbine_quic_endpoint_sender, turbine_quic_endpoint_receiver) = crossbeam_unbounded();
                 
                 let turbine_disabled = Arc::new(AtomicBool::new(false));
 
-                let fetch_stage = ShredFetchStage::new(
-                    fetch_sockets,
-                    turbine_quic_endpoint_receiver,
-                    repair_socket.clone(),
-                    quic_endpoint_response_receiver,
-                    fetch_sender,
-                    50093,
-                    bank_forks.clone(),
-                    cluster_info.clone(),
-                    turbine_disabled,
-                    exit.clone(),
-                );
+                let fetch_sockets_clone = fetch_sockets.clone();
+                // let fetch_stage = ShredFetchStage::new(
+                //     fetch_sockets_clone,
+                //     turbine_quic_endpoint_receiver,
+                //     repair_socket.clone(),
+                //     quic_endpoint_response_receiver,
+                //     fetch_sender,
+                //     50093,
+                //     bank_forks.clone(),
+                //     cluster_info.clone(),
+                //     turbine_disabled,
+                //     exit.clone(),
+                // );
 
-                // // Create counters for shred statistics
-                // let total_shreds = Arc::new(AtomicU64::new(0));
-                // let data_shreds = Arc::new(AtomicU64::new(0));
-                // let coding_shreds = Arc::new(AtomicU64::new(0));
-                // let total_shreds_for_stats = total_shreds.clone();
-                // let data_shreds_for_stats = data_shreds.clone();
-                // let coding_shreds_for_stats = coding_shreds.clone();
+                
+                // Spawn a thread to run the streamers
+                let _streamer_thread = std::thread::spawn(move || {
 
-                // Start stats reporting thread
-                // let exit_clone = exit.clone();
-                // let blockstore_for_stats = blockstore.clone();
-                // let _stats_thread = Builder::new()
-                //     .name("repairStats".to_string())
-                //     .spawn(move || {
-                //         while !exit_clone.load(Ordering::Relaxed) {
-                //             // Report shred statistics
-                //             let total = total_shreds_for_stats.load(Ordering::Relaxed);
-                //             let data = data_shreds_for_stats.load(Ordering::Relaxed);
-                //             let coding = coding_shreds_for_stats.load(Ordering::Relaxed);
-                //             info!(
-                //                 "Shred statistics - Total: {}, Data: {}, Coding: {}",
-                //                 total, data, coding
-                //             );
+                    let recycler: solana_perf::recycler::Recycler<solana_perf::cuda_runtime::PinnedVec<solana_sdk::packet::Packet>> = PacketBatchRecycler::warmed(100, 1024);
 
-                //             // Report processed slots info
-                //             if let Ok(iter) = blockstore_for_stats.slot_meta_iterator(0) {
-                //                 let slots_processed = iter.count();
-                //                 info!("Total slots processed: {}", slots_processed);
-                //             } else {
-                //                 warn!("Failed to read slot meta iterator");
-                //             }
+                    let (packet_sender, packet_receiver) = crossbeam_unbounded();
+                    let sockets = vec![repair_socket.clone()];
+                    let streamers: Vec<JoinHandle<()>> = sockets
+                        .iter()
+                        .enumerate()
+                        .map(|(i, socket)| {
+                            streamer::receiver(
+                                format!("solRcvrShred{i:02}"),
+                                socket.clone(),
+                                exit.clone(),
+                                packet_sender.clone(),
+                                recycler.clone(),
+                                Arc::new(StreamerReceiveStats::new("packet_modifier")),
+                                PACKET_COALESCE_DURATION,
+                                true, // use_pinned_memory
+                                None, // in_vote_only_mode
+                                false,
+                            )
+                        })
+                        .collect();
+                
+                    debug!("streamers: {} fetch_sockets{}", streamers.len(), fetch_sockets.len());
+                    
 
-                //             thread::sleep(Duration::from_secs(5));
-                //         }
-                //     })
-                //     .unwrap();
+                    // Wait for all streamers to complete
+                    for streamer in streamers {
+                        let _ = streamer.join();
+                    }
 
-                // loop {
-                //     if exit.load(Ordering::Relaxed) {
-                //         break;
-                //     }
 
-                //     // Receive shreds
-                //     if let Ok((size, addr)) = repair_socket.recv_from(&mut buf) {
-                //         if let Ok(shred) = Shred::new_from_serialized_shred(buf[..size].to_vec()) {
-                //             let slot = shred.slot();
-                //             let is_data = shred.is_data();
+                    let modifier_hdl = Builder::new()
+                    .name("modifier_thread_name".to_string())
+                    .spawn(move || {
+                        // let repair_context = repair_context
+                        //     .as_ref()
+                        //     .map(|(socket, cluster_info)| (socket.as_ref(), cluster_info.as_ref()));
+                            loop{
+                                for packet_batch in packet_receiver.clone() {
+                                    debug!("packet_batch: {} ",packet_batch.len());
+                                }
+                            }
+                       
+                    })
+                    .unwrap();
 
-                //             // Update counters
-                //             total_shreds.fetch_add(1, Ordering::Relaxed);
-                //             if is_data {
-                //                 data_shreds.fetch_add(1, Ordering::Relaxed);
-                //             } else {
-                //                 coding_shreds.fetch_add(1, Ordering::Relaxed);
-                //             }
+                    modifier_hdl.join().unwrap();
+                
+                });
 
-                //             info!(
-                //                 "Received shred from {}: slot {} index {} type {}",
-                //                 addr,
-                //                 slot,
-                //                 shred.index(),
-                //                 if is_data { "data" } else { "coding" }
-                //             );
+                info!("Shred collection started");
 
-                //             if let Err(err) = blockstore.insert_shreds(vec![shred], None, false) {
-                //                 warn!("Failed to insert shred: {:?}", err);
-                //             }
-                //         }
-                //     }
-                // }
             })
             .unwrap();
 

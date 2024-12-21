@@ -38,8 +38,10 @@ use {
         thread::sleep,
         time::Duration,
     },
+    
 };
-
+use std::collections::HashSet;
+use std::str::FromStr;
 fn parse_entrypoint(entrypoint: &str) -> SocketAddr {
     if let Ok(mut addrs) = entrypoint.to_socket_addrs() {
         if let Some(addr) = addrs.next() {
@@ -228,11 +230,26 @@ fn main() {
     }
 
     let exit = Arc::new(AtomicBool::new(false));
+    
+    let gossip_validators = HashSet::from([
+        "HzrEstnLfzsijhaD6z5frkSE2vWZEH5EUfn3bU9swo1f",
+        "EC6axG4VsaAifzQ7JDDqEBrC99gZaszmkFcDvQiNM4Dj",
+        "5Cchr1XGEg7dbBXByV5NY2ad8jfxAM7HA3x8D56rq9Ux",
+        "G2TBEh2ahNGS9tGnuBNyDduNjyfUtGhMcssgRb8b6KfH",
+        "9jnYKtJoHKsR5XudQnvR9cXTxeorQf8C1wqZvU79govG",
+        "EfPYQ4BUMiKa6736qqrtnCBGkUSRDGSr1WvtyUgWHuyp", 
+        "CW9C7HBwAMgqNdXkNgFg9Ujr3edR2Ab9ymEuQnVacd1A",
+        "245B9WFHUGuWycSXHagHXwsXGcxDkNYfxWBaeh7vAHDU",
+        "DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy",
+        "HpcB5Qg8Y9E73dUkot5e8HkgAJbExsYeUzniY4bCuKac",
+        "AicQr2zCWBLiBwt2r6o7iTemmtyE7q5pTKyuuupbXEQA"
+    ].iter().map(|s| Pubkey::from_str(s).unwrap()).collect::<HashSet<Pubkey>>());
+
     let _gossip_service = GossipService::new(
         &cluster_info,
         None,
         gossip_socket,
-        None,
+        Some(gossip_validators.clone()),
         true,
         None,
         exit.clone(),
