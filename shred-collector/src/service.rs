@@ -99,7 +99,8 @@ impl ShredCollectorService {
                 let repair_whitelist = Arc::new(RwLock::new(HashSet::default()));
 
                 // Create channels for QUIC endpoint
-                let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio_channel(128);
+                // let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio_channel(128);
+                let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio::sync::mpsc::channel(1);
                 let (quic_endpoint_response_sender, _quic_endpoint_response_receiver) = crossbeam_unbounded();
 
                 // Create verified vote receiver channel

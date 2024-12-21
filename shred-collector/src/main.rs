@@ -185,19 +185,22 @@ fn main() {
 
     info!("Gossip address: {}", gossip_addr);
 
-    let mut node = Node::new_single_bind(
+    // const MY_VALIDATOR_PORT_RANGE = (10010, 10020);
+
+    let  node = Node::new_single_bind(
         &identity_keypair.pubkey(),
         &gossip_addr,
-        VALIDATOR_PORT_RANGE,
+        (gossip_addr.port(), gossip_addr.port() + 100),
         bind_address,
     );
 
+
     // Remove unused ports since we only need gossip and repair
-    node.info.remove_tpu();
-    node.info.remove_tpu_forwards();
-    node.info.remove_tvu();
-    node.info.remove_serve_repair();
-    node.sockets.ip_echo = None;
+    // node.info.remove_tpu();
+    // node.info.remove_tpu_forwards();
+    // node.info.remove_tvu();
+    // node.info.remove_serve_repair();
+    // node.sockets.ip_echo = None;
 
     // Get the gossip socket before wrapping node in Arc
     let gossip_socket = node.sockets.gossip.try_clone().unwrap_or_else(|e| {
