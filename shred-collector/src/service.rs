@@ -238,30 +238,29 @@ impl ShredCollectorService {
                 
                     debug!("streamers: {} fetch_sockets{}", streamers.len(), fetch_sockets.len());
                     
+                    let modifier_hdl = Builder::new()
+                        .name("modifier_thread_name".to_string())
+                        .spawn(move || {
+                            loop {
+
+                                if exit.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                
+                                for packet_batch in packet_receiver.try_iter() {
+                                    trace!("packet_batch: {} ", packet_batch.len());
+                                }
+                                // debug!("packet_receiver: {} ", packet_receiver.len());
+                            }
+                        })
+                        .unwrap();
 
                     // Wait for all streamers to complete
                     for streamer in streamers {
                         let _ = streamer.join();
                     }
 
-
-                    let modifier_hdl = Builder::new()
-                    .name("modifier_thread_name".to_string())
-                    .spawn(move || {
-                        // let repair_context = repair_context
-                        //     .as_ref()
-                        //     .map(|(socket, cluster_info)| (socket.as_ref(), cluster_info.as_ref()));
-                            loop{
-                                for packet_batch in packet_receiver.clone() {
-                                    debug!("packet_batch: {} ",packet_batch.len());
-                                }
-                            }
-                       
-                    })
-                    .unwrap();
-
                     modifier_hdl.join().unwrap();
-                
                 });
 
                 info!("Shred collection started");
