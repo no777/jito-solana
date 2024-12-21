@@ -98,10 +98,6 @@ impl ShredCollectorService {
                 // Create repair whitelist
                 let repair_whitelist = Arc::new(RwLock::new(HashSet::default()));
 
-                // Create channels for QUIC endpoint
-                let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio_channel(128);
-                let (quic_endpoint_response_sender, _quic_endpoint_response_receiver) = crossbeam_unbounded();
-
                 // Create verified vote receiver channel
                 let (_verified_vote_sender, verified_vote_receiver) = crossbeam_unbounded();
                 
@@ -154,14 +150,22 @@ impl ShredCollectorService {
                     error!("Failed to clone ancestor hashes socket: {}", e);
                     std::process::exit(1);
                 }));
+                
+                // Create channels for QUIC endpoint
+                // let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio_channel(128);
+                let (quic_endpoint_response_sender, _quic_endpoint_response_receiver) = crossbeam_unbounded();
 
+                let (repair_quic_endpoint_sender, _receiver) = tokio::sync::mpsc::channel(1);
+
+               
+                
                 // Create RepairService
                 let _repair_service = RepairService::new(
                     blockstore.clone(),
                     exit.clone(),
                     repair_socket.clone(),
                     ancestor_hashes_socket,
-                    quic_endpoint_sender,
+                    repair_quic_endpoint_sender,
                     quic_endpoint_response_sender,
                     repair_info,
                     verified_vote_receiver,

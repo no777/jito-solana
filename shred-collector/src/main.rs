@@ -185,12 +185,20 @@ fn main() {
 
     info!("Gossip address: {}", gossip_addr);
 
+    // let mut node = Node::new_single_bind(
+    //     &identity_keypair.pubkey(),
+    //     &gossip_addr,
+    //     VALIDATOR_PORT_RANGE,
+    //     bind_address,
+    // );
+
     let mut node = Node::new_single_bind(
         &identity_keypair.pubkey(),
         &gossip_addr,
-        VALIDATOR_PORT_RANGE,
+        (gossip_addr.port() + 1, gossip_addr.port() + 10),
         bind_address,
     );
+
 
     // Remove unused ports since we only need gossip and repair
     node.info.remove_tpu();
