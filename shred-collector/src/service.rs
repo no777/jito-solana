@@ -153,7 +153,7 @@ fn prune_shreds_by_repair_status(
     accept_repairs_only: bool,
 ) {
     debug!("prune_shreds_by_repair_status shreds.len: {}", shreds.len());
-    
+
     assert_eq!(shreds.len(), repair_infos.len());
     let mut i = 0;
     let mut removed = HashSet::new();
@@ -202,11 +202,22 @@ where
     // ws_metrics.shred_receiver_elapsed_us += shred_receiver_elapsed.as_us();
     // ws_metrics.run_insert_count += 1;
     let handle_packet = |packet: &Packet| {
+        
+        debug!("packet.meta().repair(): {}", packet.meta().repair());
         if packet.meta().discard() {
-            return None;
+            debug!("packet.meta().discard(): {}", packet.meta().discard());
+            // return None;
         }
+        // let shred = shred::layout::get_shred(packet);
+        // debug!("get_shred: {}", shred);
+        // let size = packet.data(..).len();
+        debug!("packet data: {:?}", packet.data(..));
+        
         let shred = shred::layout::get_shred(packet)?;
+        debug!("get_shred:0");
         let shred = Shred::new_from_serialized_shred(shred.to_vec()).ok()?;
+        debug!("get_shred:1");
+        debug!("handle_packet shred index: {}", shred.index());
         if packet.meta().repair() {
             let repair_info = RepairMeta {
                 // If can't parse the nonce, dump the packet.

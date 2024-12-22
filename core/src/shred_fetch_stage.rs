@@ -133,6 +133,7 @@ impl ShredFetchStage {
                         &mut stats,
                     )
                 {
+                    debug!("discarding packet last_root {} max_slot {} ",last_root,max_slot);
                     packet.meta_mut().set_discard(true);
                 } else {
                     packet.meta_mut().flags.insert(flags);
