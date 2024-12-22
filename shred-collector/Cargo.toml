@@ -21,6 +21,9 @@ solana-rpc = { path = "../rpc" }
 solana-poh = { path = "../poh" }
 solana-perf = { workspace = true }
 solana-turbine = { workspace = true }
+rayon = { workspace = true }
+solana-rayon-threadlimit = { workspace = true }
+solana-measure = { workspace = true }
 
 bytes = { workspace = true }
 itertools = "0.10.5"

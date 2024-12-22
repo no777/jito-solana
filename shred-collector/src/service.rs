@@ -6,14 +6,19 @@ use {
     crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender},
     bytes::Bytes,
     itertools::Itertools,
+    rayon::{prelude::*, ThreadPool},
+    solana_measure::measure::Measure,
 
     solana_ledger::{
-        blockstore::Blockstore,
+        blockstore::{Blockstore, BlockstoreInsertionMetrics, PossibleDuplicateShred},
         genesis_utils::create_genesis_config,
         leader_schedule_cache::LeaderScheduleCache,
+        shred::{self, Nonce, ReedSolomonCache, Shred},
+
     },
 
-    solana_ledger::shred::{should_discard_shred, ShredFetchStats},
+
+    solana_rayon_threadlimit::get_thread_count,
 
 
     solana_accounts_db::{
@@ -26,20 +31,19 @@ use {
              RepairProtocol, RepairRequestHeader, ServeRepair, ShredRepairType,
             
         },
+        repair::repair_response,
         shred_fetch_stage::ShredFetchStage,
         
         cluster_slots_service::cluster_slots::ClusterSlots,
+        result::{Error, Result},
+        
     },
     solana_sdk::{
-        clock::{Slot, DEFAULT_MS_PER_SLOT},
+        clock::{Slot},
         native_token::LAMPORTS_PER_SOL,
-        epoch_schedule::EpochSchedule,
-        feature_set::{self, FeatureSet},
-        genesis_config::ClusterType,
-        packet::{Meta, PACKET_DATA_SIZE},
+      
         pubkey::Pubkey,
     },
-    solana_turbine::retransmit_stage::RetransmitStage,
     solana_runtime::{
         bank::Bank,
         bank_forks::BankForks,
@@ -60,14 +64,38 @@ use {
     crossbeam_channel::unbounded as crossbeam_unbounded,
 
     solana_streamer::streamer::{self, PacketBatchReceiver, StreamerReceiveStats},
-    solana_perf::packet::{PacketBatch, PacketBatchRecycler, PacketFlags, PACKETS_PER_BATCH},
+    // solana_perf::packet::{PacketBatch, PacketBatchRecycler, PacketFlags, PACKETS_PER_BATCH},
+    // solana_perf::packet::{Packet},
+    solana_perf::packet::{Packet, PacketBatch},
 
 };
-
+// pub enum Error {
+//     #[error(transparent)]
+//     Blockstore(#[from] blockstore::BlockstoreError),
+//     #[error(transparent)]
+//     Gossip(#[from] GossipError),
+//     #[error(transparent)]
+//     Io(#[from] std::io::Error),
+//     #[error("ReadyTimeout")]
+//     ReadyTimeout,
+//     #[error(transparent)]
+//     Recv(#[from] crossbeam_channel::RecvError),
+//     #[error(transparent)]
+//     RecvTimeout(#[from] crossbeam_channel::RecvTimeoutError),
+//     #[error("Send")]
+//     Send,
+//     #[error("TrySend")]
+//     TrySend,
+// }
+// pub type Result<T> = std::result::Result<T, Error>;
+struct RepairMeta {
+    nonce: Nonce,
+}
 pub struct ShredCollectorService {
     fetch_stage: ShredFetchStage,
     repair_service: RepairService,
     shred_sigverify: JoinHandle<()>,
+    insert_thread: JoinHandle<()>,
 
 }
 const PACKET_COALESCE_DURATION: Duration = Duration::from_millis(1);
@@ -96,6 +124,215 @@ impl Default for ShredCollectorServiceConfig {
         }
     }
 }
+
+
+fn verify_repair(
+    outstanding_requests: &mut OutstandingShredRepairs,
+    shred: &Shred,
+    repair_meta: &Option<RepairMeta>,
+) -> bool {
+    repair_meta
+        .as_ref()
+        .map(|repair_meta| {
+            outstanding_requests
+                .register_response(
+                    repair_meta.nonce,
+                    shred,
+                    solana_sdk::timing::timestamp(),
+                    |_| (),
+                )
+                .is_some()
+        })
+        .unwrap_or(true)
+}
+
+fn prune_shreds_by_repair_status(
+    shreds: &mut Vec<Shred>,
+    repair_infos: &mut Vec<Option<RepairMeta>>,
+    outstanding_requests: &RwLock<OutstandingShredRepairs>,
+    accept_repairs_only: bool,
+) {
+    debug!("prune_shreds_by_repair_status shreds.len: {}", shreds.len());
+    
+    assert_eq!(shreds.len(), repair_infos.len());
+    let mut i = 0;
+    let mut removed = HashSet::new();
+    {
+        let mut outstanding_requests = outstanding_requests.write().unwrap();
+        shreds.retain(|shred| {
+            let should_keep = (
+                (!accept_repairs_only || repair_infos[i].is_some())
+                    && verify_repair(&mut outstanding_requests, shred, &repair_infos[i]),
+                i += 1,
+            )
+                .0;
+            if !should_keep {
+                removed.insert(i - 1);
+            }
+            should_keep
+        });
+    }
+    i = 0;
+    repair_infos.retain(|_repair_info| (!removed.contains(&i), i += 1).0);
+    assert_eq!(shreds.len(), repair_infos.len());
+}
+#[allow(clippy::too_many_arguments)]
+fn run_insert<F>(
+    thread_pool: &ThreadPool,
+    verified_receiver: &Receiver<Vec<PacketBatch>>,
+    blockstore: &Blockstore,
+    leader_schedule_cache: &LeaderScheduleCache,
+    handle_duplicate: F,
+    // metrics: &mut BlockstoreInsertionMetrics,
+    // ws_metrics: &mut WindowServiceMetrics,
+    // completed_data_sets_sender: Option<&CompletedDataSetsSender>,
+    // retransmit_sender: &Sender<Vec<ShredPayload>>,
+    outstanding_requests: &RwLock<OutstandingShredRepairs>,
+    // reed_solomon_cache: &ReedSolomonCache,
+    accept_repairs_only: bool,
+) -> Result<()>
+where
+    F: Fn(PossibleDuplicateShred),
+{
+    const RECV_TIMEOUT: Duration = Duration::from_millis(200);
+    let mut shred_receiver_elapsed = Measure::start("shred_receiver_elapsed");
+    let mut packets = verified_receiver.recv_timeout(RECV_TIMEOUT)?;
+    packets.extend(verified_receiver.try_iter().flatten());
+    shred_receiver_elapsed.stop();
+    // ws_metrics.shred_receiver_elapsed_us += shred_receiver_elapsed.as_us();
+    // ws_metrics.run_insert_count += 1;
+    let handle_packet = |packet: &Packet| {
+        if packet.meta().discard() {
+            return None;
+        }
+        let shred = shred::layout::get_shred(packet)?;
+        let shred = Shred::new_from_serialized_shred(shred.to_vec()).ok()?;
+        if packet.meta().repair() {
+            let repair_info = RepairMeta {
+                // If can't parse the nonce, dump the packet.
+                nonce: repair_response::nonce(packet)?,
+            };
+            Some((shred, Some(repair_info)))
+        } else {
+            Some((shred, None))
+        }
+    };
+    let now = Instant::now();
+    let (mut shreds, mut repair_infos): (Vec<_>, Vec<_>) = thread_pool.install(|| {
+        packets
+            .par_iter()
+            .flat_map_iter(|packets| packets.iter().filter_map(handle_packet))
+            .unzip()
+    });
+    // ws_metrics.handle_packets_elapsed_us += now.elapsed().as_micros() as u64;
+    // ws_metrics.num_packets += packets.iter().map(PacketBatch::len).sum::<usize>();
+    // ws_metrics.num_repairs += repair_infos.iter().filter(|r| r.is_some()).count();
+    // ws_metrics.num_shreds_received += shreds.len();
+    // for packet in packets.iter().flat_map(PacketBatch::iter) {
+    //     let addr = packet.meta().socket_addr();
+    //     *ws_metrics.addrs.entry(addr).or_default() += 1;
+    // }
+
+    let mut prune_shreds_elapsed = Measure::start("prune_shreds_elapsed");
+    let num_shreds = shreds.len();
+    prune_shreds_by_repair_status(
+        &mut shreds,
+        &mut repair_infos,
+        outstanding_requests,
+        accept_repairs_only,
+    );
+    // ws_metrics.num_shreds_pruned_invalid_repair = num_shreds - shreds.len();
+    // let repairs: Vec<_> = repair_infos
+    //     .iter()
+    //     .map(|repair_info| repair_info.is_some())
+    //     .collect();
+    // prune_shreds_elapsed.stop();
+    // ws_metrics.prune_shreds_elapsed_us += prune_shreds_elapsed.as_us();
+
+    // let completed_data_sets = blockstore.insert_shreds_handle_duplicate(
+    //     shreds,
+    //     repairs,
+    //     Some(leader_schedule_cache),
+    //     false, // is_trusted
+    //     Some(retransmit_sender),
+    //     &handle_duplicate,
+    //     reed_solomon_cache,
+    //     metrics,
+    // )?;
+
+    // if let Some(sender) = completed_data_sets_sender {
+    //     sender.try_send(completed_data_sets)?;
+    // }
+
+    Ok(())
+}
+
+
+
+fn start_insert_thread(
+    exit: Arc<AtomicBool>,
+    blockstore: Arc<Blockstore>,
+    leader_schedule_cache: Arc<LeaderScheduleCache>,
+    verified_receiver: Receiver<Vec<PacketBatch>>,
+    check_duplicate_sender: Sender<PossibleDuplicateShred>,
+    // completed_data_sets_sender: Option<CompletedDataSetsSender>,
+    // retransmit_sender: Sender<Vec<ShredPayload>>,
+    outstanding_requests: Arc<RwLock<OutstandingShredRepairs>>,
+    accept_repairs_only: bool,
+) -> JoinHandle<()> {
+    let handle_error = || {
+        // inc_new_counter_error!("solana-window-insert-error", 1, 1);
+    };
+    let thread_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(get_thread_count().min(8))
+        .thread_name(|i| format!("solWinInsert{i:02}"))
+        .build()
+        .unwrap();
+    // let reed_solomon_cache = ReedSolomonCache::default();
+    Builder::new()
+        .name("solWinInsert".to_string())
+        .spawn(move || {
+            let handle_duplicate = |possible_duplicate_shred| {
+                let _ = check_duplicate_sender.send(possible_duplicate_shred);
+            };
+            // let mut metrics = BlockstoreInsertionMetrics::default();
+            // let mut ws_metrics = WindowServiceMetrics::default();
+            // let mut last_print = Instant::now();
+            while !exit.load(Ordering::Relaxed) {
+
+                debug!("run_insert");   
+                if let Err(e) = run_insert(
+                    &thread_pool,
+                    &verified_receiver,
+                    &blockstore,
+                    &leader_schedule_cache,
+                    handle_duplicate,
+                    // &mut metrics,
+                    // &mut ws_metrics,
+                    // completed_data_sets_sender.as_ref(),
+                    // &retransmit_sender,
+                    &outstanding_requests,
+                    // &reed_solomon_cache,
+                    accept_repairs_only,
+                ) {
+                    // ws_metrics.record_error(&e);
+                    // if Self::should_exit_on_error(e, &handle_error) {
+                    //     break;
+                    // }
+                }
+
+                // if last_print.elapsed().as_secs() > 2 {
+                //     metrics.report_metrics("blockstore-insert-shreds");
+                //     metrics = BlockstoreInsertionMetrics::default();
+                //     ws_metrics.report_metrics("recv-window-insert-shreds");
+                //     ws_metrics = WindowServiceMetrics::default();
+                //     last_print = Instant::now();
+                // }
+            }
+        })
+        .unwrap()
+}
+
 
 pub fn spawn_shred_sigverify(
     cluster_info: Arc<ClusterInfo>,
@@ -274,6 +511,10 @@ impl ShredCollectorService {
                     std::process::exit(1);
                 }));
 
+              
+                let accept_repairs_only = repair_info.wen_restart_repair_slots.is_some();
+
+                
   // Create channels for QUIC endpoint
                 // let (quic_endpoint_sender, _quic_endpoint_receiver) = tokio_channel(128);
                 let (quic_endpoint_sender, quic_endpoint_receiver) = tokio::sync::mpsc::channel(1);
@@ -292,12 +533,47 @@ impl ShredCollectorService {
                     repair_quic_endpoint_response_sender,
                     repair_info,
                     verified_vote_receiver,
-                    outstanding_requests,
+                    outstanding_requests.clone(),
                     ancestor_hashes_replay_update_receiver,
                     dumped_slots_receiver,
                     popular_pruned_forks_sender,
                 );
+                  
+                let bank = bank_forks.read().unwrap().working_bank();
+
+                let leader_schedule_cache: Arc<LeaderScheduleCache> = Arc::new(LeaderScheduleCache::new_from_bank(&bank));
+
+                let (verified_sender, verified_receiver) = unbounded();
+                let (retransmit_sender, retransmit_receiver) = unbounded();
+
                 
+                 // let recycler: solana_perf::recycler::Recycler<solana_perf::cuda_runtime::PinnedVec<solana_sdk::packet::Packet>> = PacketBatchRecycler::warmed(100, 1024);
+                 let (fetch_sender, fetch_receiver) = unbounded();
+              
+
+                let shred_sigverify = solana_turbine::sigverify_shreds::spawn_shred_sigverify(
+                    cluster_info.clone(),
+                    bank_forks.clone(),
+                    leader_schedule_cache.clone(),
+                    fetch_receiver,
+                    retransmit_sender.clone(),
+                    verified_sender,
+                );
+             
+
+                let (duplicate_sender, duplicate_receiver) = unbounded();
+
+                let insert_thread = start_insert_thread(
+                    exit.clone(),
+                    blockstore.clone(),
+                    leader_schedule_cache.clone(),
+                    verified_receiver,
+                    duplicate_sender,
+                    // completed_data_sets_sender,
+                    // retransmit_sender,
+                    outstanding_requests,
+                    accept_repairs_only,
+                );
 
                 info!("Starting shred collection from slot {}", start_slot);
 
@@ -335,33 +611,8 @@ impl ShredCollectorService {
 
                 let shred_version = config.shred_version;
 
-                let recycler: solana_perf::recycler::Recycler<solana_perf::cuda_runtime::PinnedVec<solana_sdk::packet::Packet>> = PacketBatchRecycler::warmed(100, 1024);
-                let (fetch_sender, fetch_receiver) = unbounded();
-                
-                let bank = bank_forks.read().unwrap().working_bank();
-
-                let leader_schedule_cache: Arc<LeaderScheduleCache> = Arc::new(LeaderScheduleCache::new_from_bank(&bank));
-
-                let (verified_sender, verified_receiver) = unbounded();
-                let (retransmit_sender, retransmit_receiver) = unbounded();
-
-                
-                // let shred_sigverify = spawn_shred_sigverify(
-                //     cluster_info.clone(),
-                //     bank_forks.clone(),
-                //     leader_schedule_cache.clone(),
-                //     fetch_receiver,
-                //     retransmit_sender.clone(),
-                //     verified_sender,
-                // );
-                let shred_sigverify = solana_turbine::sigverify_shreds::spawn_shred_sigverify(
-                    cluster_info.clone(),
-                    bank_forks.clone(),
-                    leader_schedule_cache.clone(),
-                    fetch_receiver,
-                    retransmit_sender.clone(),
-                    verified_sender,
-                );
+              
+                   
 
                 let (_turbine_quic_endpoint_sender, turbine_quic_endpoint_receiver) = unbounded();
 
@@ -522,6 +773,7 @@ impl ShredCollectorService {
                     fetch_stage,
                     repair_service,
                     shred_sigverify,
+                    insert_thread,
                 }
     }
 
@@ -530,6 +782,7 @@ impl ShredCollectorService {
         self.repair_service.join()?;
 
         self.shred_sigverify.join()?;
+        self.insert_thread.join()?;
         Ok(())
     }
 
