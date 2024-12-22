@@ -137,7 +137,7 @@ fn verify_repair(
     shred: &Shred,
     repair_meta: &Option<RepairMeta>,
 ) -> bool {
-    repair_meta
+    let r = repair_meta
         .as_ref()
         .map(|repair_meta| {
             outstanding_requests
@@ -149,7 +149,10 @@ fn verify_repair(
                 )
                 .is_some()
         })
-        .unwrap_or(true)
+        .unwrap_or(true);
+
+    debug!("verify_repair {}",r);
+    r
 }
 
 fn prune_shreds_by_repair_status(
@@ -158,7 +161,7 @@ fn prune_shreds_by_repair_status(
     outstanding_requests: &RwLock<OutstandingShredRepairs>,
     accept_repairs_only: bool,
 ) {
-    debug!("prune_shreds_by_repair_status shreds.len: {}", shreds.len());
+    debug!("prune_shreds_by_repair_status shreds.len: {} accept_repairs_only: {}", shreds.len(),accept_repairs_only);
 
     assert_eq!(shreds.len(), repair_infos.len());
     let mut i = 0;
@@ -227,7 +230,7 @@ where
         // debug!("get_shred:0");
         let shred = Shred::new_from_serialized_shred(shred.to_vec()).ok()?;
         // debug!("get_shred:1");
-        debug!("handle_packet shred index: {}", shred.index());
+        debug!("handle_packet shred slot:{} index: {}", shred.slot(), shred.index());
         if packet.meta().repair() {
             let repair_info = RepairMeta {
                 // If can't parse the nonce, dump the packet.
@@ -478,7 +481,8 @@ impl ShredCollectorService {
                 let cluster_slots = Arc::new(ClusterSlots::default());
 
                 // Initialize repair slots with start_slot
-                let repair_slots = vec![start_slot];
+                // let repair_slots = vec![start_slot];
+                let repair_slots = vec![];
 
                 let wen_restart_repair_slots = Arc::new(RwLock::new(repair_slots));
                 let epoch_schedule = bank_forks
@@ -510,7 +514,7 @@ impl ShredCollectorService {
                 }));
 
               
-                let accept_repairs_only = repair_info.wen_restart_repair_slots.is_some();
+                let accept_repairs_only = false;//repair_info.wen_restart_repair_slots.is_some();
 
                 
   // Create channels for QUIC endpoint

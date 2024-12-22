@@ -967,6 +967,9 @@ impl Blockstore {
         reed_solomon_cache: &ReedSolomonCache,
         metrics: &mut BlockstoreInsertionMetrics,
     ) -> Result<InsertResults> {
+
+        debug!("do_insert_shreds {}", shreds.len());
+            
         assert_eq!(shreds.len(), is_repaired.len());
         let mut total_start = Measure::start("Total elapsed");
         let mut start = Measure::start("Blockstore lock");
@@ -993,6 +996,7 @@ impl Blockstore {
             } else {
                 ShredSource::Turbine
             };
+            debug!("inserting shred: slot {}, index{} type: {:?}  source: {:?}", shred.slot(),shred.index(),shred.shred_type(),shred_source);
             match shred.shred_type() {
                 ShredType::Data => {
                     match self.check_insert_data_shred(
@@ -1615,6 +1619,7 @@ impl Blockstore {
     ) -> std::result::Result<Vec<CompletedDataSetInfo>, InsertDataShredError> {
         let slot = shred.slot();
         let shred_index = u64::from(shred.index());
+        debug!("check_insert_data_shred slot: {slot}, index: {shred_index}");
 
         let index_meta_working_set_entry =
             self.get_index_meta_entry(slot, index_working_set, index_meta_time_us);
@@ -1634,7 +1639,6 @@ impl Blockstore {
                 entry.insert(WorkingEntry::Clean(meta));
             }
         }
-
         if !is_trusted {
             if Self::is_data_shred_present(&shred, slot_meta, index_meta.data()) {
                 duplicate_shreds.push(PossibleDuplicateShred::Exists(shred));
@@ -1686,6 +1690,7 @@ impl Blockstore {
                 }
             }
         }
+        debug!("check_insert_data_shred 1");
 
         let newly_completed_data_sets = self.insert_data_shred(
             slot_meta,
@@ -1705,6 +1710,8 @@ impl Blockstore {
                 entry.insert(WorkingEntry::Clean(meta));
             }
         }
+        debug!("check_insert_data_shred 2");
+
         Ok(newly_completed_data_sets)
     }
 

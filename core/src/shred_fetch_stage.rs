@@ -27,6 +27,7 @@ use {
         thread::{self, Builder, JoinHandle},
         time::{Duration, Instant},
     },
+ 
 };
 
 const PACKET_COALESCE_DURATION: Duration = Duration::from_millis(1);
@@ -142,6 +143,8 @@ impl ShredFetchStage {
                 } else {
                     packet.meta_mut().flags.insert(flags);
                 }
+
+                
             }
             stats.maybe_submit(name, STATS_SUBMIT_CADENCE);
             if let Err(err) = sendr.send(packet_batch) {
