@@ -1,11 +1,7 @@
 use {
     log::*,
-    solana_gossip::{
-        cluster_info::{ClusterInfo, Node},
-    },
-    crossbeam_channel::{bounded,unbounded, Receiver, RecvTimeoutError, Sender},
-    bytes::Bytes,
-    itertools::Itertools,
+    solana_gossip::cluster_info::{ClusterInfo, Node},
+    crossbeam_channel::{bounded,unbounded, Receiver, Sender},
     rayon::{prelude::*, ThreadPool},
     solana_measure::measure::Measure,
 
@@ -28,22 +24,18 @@ use {
     solana_core::{
         completed_data_sets_service::CompletedDataSetsSender,
         repair::repair_service::{RepairService, RepairInfo, OutstandingShredRepairs},
-        repair::serve_repair::{
-             RepairProtocol, RepairRequestHeader, ServeRepair, ShredRepairType,
-            
-        },
+        
         repair::repair_response,
         shred_fetch_stage::ShredFetchStage,
         
         cluster_slots_service::cluster_slots::ClusterSlots,
-        result::{Error, Result},
+        result::Result,
         
     },
     solana_sdk::{
-        clock::{Slot},
+        clock::Slot,
         native_token::LAMPORTS_PER_SOL,
       
-        pubkey::Pubkey,
     },
     solana_runtime::{
         bank::Bank,
@@ -97,6 +89,7 @@ const MAX_COMPLETED_DATA_SETS_IN_CHANNEL: usize = 100_000;
 struct RepairMeta {
     nonce: Nonce,
 }
+
 pub struct ShredCollectorService {
     fetch_stage: ShredFetchStage,
     repair_service: RepairService,
@@ -104,15 +97,14 @@ pub struct ShredCollectorService {
     insert_thread: JoinHandle<()>,
 
 }
-const PACKET_COALESCE_DURATION: Duration = Duration::from_millis(1);
 pub struct ShredCollectorServiceConfig {
-    pub max_ledger_shreds: Option<u64>,
+    // pub max_ledger_shreds: Option<u64>,
     pub shred_version: u16,
     // Validators from which repairs are requested
-    pub repair_validators: Option<HashSet<Pubkey>>,
+    // pub repair_validators: Option<HashSet<Pubkey>>,
     // Validators which should be given priority when serving repairs
-    pub repair_whitelist: Arc<RwLock<HashSet<Pubkey>>>,
-    pub wait_for_vote_to_start_leader: bool,
+    // pub repair_whitelist: Arc<RwLock<HashSet<Pubkey>>>,
+    // pub wait_for_vote_to_start_leader: bool,
     // pub replay_forks_threads: NonZeroUsize,
     // pub replay_transactions_threads: NonZeroUsize,
 }
@@ -120,11 +112,11 @@ pub struct ShredCollectorServiceConfig {
 impl Default for ShredCollectorServiceConfig {
     fn default() -> Self {
         Self {
-            max_ledger_shreds: None,
+            // max_ledger_shreds: None,
             shred_version: 0,
-            repair_validators: None,
-            repair_whitelist: Arc::new(RwLock::new(HashSet::default())),
-            wait_for_vote_to_start_leader: false,
+            // repair_validators: None,
+            // repair_whitelist: Arc::new(RwLock::new(HashSet::default())),
+            // wait_for_vote_to_start_leader: false,
             // replay_forks_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
             // replay_transactions_threads: NonZeroUsize::new(1).expect("1 is non-zero"),
         }
@@ -358,41 +350,6 @@ fn start_insert_thread(
 }
 
 
-// pub fn spawn_shred_sigverify(
-//     cluster_info: Arc<ClusterInfo>,
-//     bank_forks: Arc<RwLock<BankForks>>,
-//     leader_schedule_cache: Arc<LeaderScheduleCache>,
-//     shred_fetch_receiver: Receiver<PacketBatch>,
-//     retransmit_sender: Sender<Vec</*shred:*/ Vec<u8>>>,
-//     verified_sender: Sender<Vec<PacketBatch>>,
-// ) -> JoinHandle<()> {
-//     let test_loop = move || {
-//         for mut packet_batch in shred_fetch_receiver {
-//             debug!("spawn_shred_sigverify packet_batch: {} ", packet_batch.len());
-            
-//             // Process each packet in the batch
-//             for packet in packet_batch.iter_mut() {
-//                 if packet.meta().discard() {
-//                     continue;
-//                 }
-                
-//                 // Set the size of the packet data
-//                 let buffer = packet.buffer_mut();
-//                 packet.meta_mut().size = buffer.len();
-//                 debug!("packet meta size set to: {}", packet.meta().size);
-//             }
-            
-//             // Send the processed batch to the verified sender
-//             if let Err(e) = verified_sender.send(vec![packet_batch]) {
-//                 error!("Failed to send verified packet batch: {:?}", e);
-//             }
-//         }
-//     };
-//     Builder::new()
-//         .name("solShredVerifr".to_string())
-//         .spawn(test_loop)
-//         .unwrap()
-// }
 
 impl ShredCollectorService {
     
@@ -405,7 +362,7 @@ impl ShredCollectorService {
         cluster_info: Arc<ClusterInfo>,
         start_slot: Slot,
         exit: Arc<AtomicBool>,
-    ) -> Self {
+    ) -> std::result::Result<Self, String> {
         
 
                 debug!("ShredCollectorService::new");
@@ -642,154 +599,20 @@ impl ShredCollectorService {
                 );
 
 
-        //         let sender = fetch_sender;
-        //         let (mut tvu_threads, tvu_filter) = Self::packet_modifier(
-        //             "solRcvrShred",
-        //             "solTvuPktMod",
-        //             sockets,
-        //             exit.clone(),
-        //             sender.clone(),
-        //             recycler.clone(),
-        //             bank_forks.clone(),
-        //             shred_version,
-        //             "shred_fetch",
-        //             PacketFlags::empty(),
-        //             None, // repair_context
-        //             turbine_disabled.clone(),
-        //         );
 
-        //   // Turbine shreds fetched over QUIC protocol.
-
-        
-        
-        //         let (repair_receiver, repair_handler) = Self::packet_modifier(
-        //             "solRcvrShredRep",
-        //             "solTvuRepPktMod",
-        //             vec![repair_socket.clone()],
-        //             exit.clone(),
-        //             sender.clone(),
-        //             recycler.clone(),
-        //             bank_forks.clone(),
-        //             shred_version,
-        //             "shred_fetch_repair",
-        //             PacketFlags::REPAIR,
-        //             Some((repair_socket, cluster_info)),
-        //             turbine_disabled.clone(),
-        //         );
-        
-
-        //         // let (streamers, modifier_hdl) = Self::packet_modifier(
-        //         //     "solRcvrShred",
-        //         //     "solTvuPktMod",
-        //         //     sockets,
-        //         //     exit.clone(),
-        //         //     fetch_sender.clone(),
-        //         //     recycler.clone(),
-        //         //     bank_forks.clone(),
-        //         //     50093,
-        //         //     "shred_fetch",
-        //         //     PacketFlags::empty(),
-        //         //     None, // repair_context
-        //         //     turbine_disabled.clone(),
-        //         // );
-                
-
-        //         tvu_threads.extend(repair_receiver);
-        //         tvu_threads.push(tvu_filter);
-        //         tvu_threads.push(repair_handler);
-        //         // Repair shreds fetched over QUIC protocol.
-        //         {
-        //             let (packet_sender, packet_receiver) = unbounded();
-        //             let bank_forks = bank_forks.clone();
-        //             let recycler = recycler.clone();
-        //             let exit = exit.clone();
-        //             let sender = sender.clone();
-        //             let turbine_disabled = turbine_disabled.clone();
-        //             tvu_threads.extend([
-        //                 Builder::new()
-        //                     .name("solTvuRecvRpr".to_string())
-        //                     .spawn(|| {
-        //                         receive_repair_quic_packets(
-        //                             repair_quic_endpoint_response_receiver,
-        //                             packet_sender,
-        //                             recycler,
-        //                             exit,
-        //                         )
-        //                     })
-        //                     .unwrap(),
-        //                 Builder::new()
-        //                     .name("solTvuFetchRpr".to_string())
-        //                     .spawn(move || {
-        //                         Self::modify_packets(
-        //                             packet_receiver,
-        //                             sender,
-        //                             &bank_forks,
-        //                             shred_version,
-        //                             "shred_fetch_repair_quic",
-        //                             PacketFlags::REPAIR,
-        //                             None, // repair_context; no ping packets!
-        //                             turbine_disabled,
-        //                         )
-        //                     })
-        //                     .unwrap(),
-        //             ]);
-        //         }
-
-
-               
-        //         let (packet_sender, packet_receiver) = unbounded();
-        //         tvu_threads.extend([
-        //             Builder::new()
-        //                 .name("solTvuRecvQuic".to_string())
-        //                 .spawn(|| {
-        //                     receive_quic_datagrams(
-        //                         turbine_quic_endpoint_receiver,
-        //                         packet_sender,
-        //                         recycler,
-        //                         exit,
-        //                     )
-        //                 })
-        //                 .unwrap(),
-        //             Builder::new()
-        //                 .name("solTvuFetchQuic".to_string())
-        //                 .spawn(move || {
-        //                     Self::modify_packets(
-        //                         packet_receiver,
-        //                         sender,
-        //                         &bank_forks,
-        //                         shred_version,
-        //                         "shred_fetch_quic",
-        //                         PacketFlags::empty(),
-        //                         None, // repair_context
-        //                         turbine_disabled,
-        //                     )
-        //                 })
-        //                 .unwrap(),
-        //         ]);
-                       
-
-
-                //  // Wait for all streamers to complete
-                //  for streamer in repair_receiver {
-                //     let _ = streamer.join();
-                // }
-
-
-
-                // repair_handler.join().unwrap();
 
                 info!("Shred collection started");
 
-
-                Self {
+                Ok(ShredCollectorService {
                     fetch_stage,
                     repair_service,
                     shred_sigverify,
                     insert_thread,
-                }
+                })
+            
     }
 
-    pub(crate) fn join(self) -> thread::Result<()> {
+    pub fn join(self) -> thread::Result<()> {
         self.fetch_stage.join()?;
         self.repair_service.join()?;
 
@@ -797,6 +620,7 @@ impl ShredCollectorService {
         self.insert_thread.join()?;
         Ok(())
     }
+
 
 
 }   

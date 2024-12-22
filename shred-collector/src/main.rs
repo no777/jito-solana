@@ -299,7 +299,7 @@ fn main() {
         cluster_info,
         start_slot,
         exit.clone(),
-    );
+    ).expect("assume success");
 
 
     info!("Started shred collector service");
@@ -313,5 +313,6 @@ fn main() {
 
     exit.store(true, Ordering::Relaxed);
     shred_collector.join().unwrap();
+    // shred_collector.expect("Failed to create shred collector service").join().unwrap();
 
 }
