@@ -37,6 +37,12 @@ pub fn verify_shred_cpu(
     slot_leaders: &HashMap<Slot, Pubkey>,
     cache: &RwLock<LruCache>,
 ) -> bool {
+
+    debug!("packet meta size: {}", packet.meta().size);
+    if let Some(data) = packet.data(..) {
+        debug!("packet data length: {}", data.len());
+    }
+    
     if packet.meta().discard() {
         return false;
     }

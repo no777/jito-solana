@@ -123,6 +123,10 @@ impl ShredFetchStage {
             };
             let turbine_disabled = turbine_disabled.load(Ordering::Relaxed);
             for packet in packet_batch.iter_mut().filter(|p| !p.meta().discard()) {
+                debug!("packet meta size: {}", packet.meta().size);
+                if let Some(data) = packet.data(..) {
+                    debug!("packet data length: {}", data.len());
+                }
                 if turbine_disabled
                     || should_discard_shred(
                         packet,

@@ -145,6 +145,7 @@ fn run_shred_sigverify<const K: usize>(
         .chain(shred_fetch_receiver.try_iter())
         .collect();
     debug!("run_shred_sigverify packet_batch: {} ",packets.len());
+
     let now = Instant::now();
     stats.num_iters += 1;
     stats.num_batches += packets.len();
@@ -171,15 +172,15 @@ fn run_shred_sigverify<const K: usize>(
 
     // debug!("verify_packets");
 
-    verify_packets(
-        thread_pool,
-        &keypair.pubkey(),
-        &working_bank,
-        leader_schedule_cache,
-        recycler_cache,
-        &mut packets,
-        cache,
-    );
+    // verify_packets(
+    //     thread_pool,
+    //     &keypair.pubkey(),
+    //     &working_bank,
+    //     leader_schedule_cache,
+    //     recycler_cache,
+    //     &mut packets,
+    //     cache,
+    // );
     // debug!("verify_packets end");
     stats.num_discards_post += count_discards(&packets);
     // Verify retransmitter's signature, and resign shreds

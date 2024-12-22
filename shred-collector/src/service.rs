@@ -3,7 +3,7 @@ use {
     solana_gossip::{
         cluster_info::{ClusterInfo, Node},
     },
-    crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender},
+    crossbeam_channel::{bounded,unbounded, Receiver, RecvTimeoutError, Sender},
     bytes::Bytes,
     itertools::Itertools,
     rayon::{prelude::*, ThreadPool},
@@ -26,6 +26,7 @@ use {
         accounts_db::AccountShrinkThreshold,
     },
     solana_core::{
+        completed_data_sets_service::CompletedDataSetsSender,
         repair::repair_service::{RepairService, RepairInfo, OutstandingShredRepairs},
         repair::serve_repair::{
              RepairProtocol, RepairRequestHeader, ServeRepair, ShredRepairType,
@@ -88,6 +89,11 @@ use {
 //     TrySend,
 // }
 // pub type Result<T> = std::result::Result<T, Error>;
+
+type ShredPayload = Vec<u8>;
+
+const MAX_COMPLETED_DATA_SETS_IN_CHANNEL: usize = 100_000;
+
 struct RepairMeta {
     nonce: Nonce,
 }
@@ -183,12 +189,12 @@ fn run_insert<F>(
     blockstore: &Blockstore,
     leader_schedule_cache: &LeaderScheduleCache,
     handle_duplicate: F,
-    // metrics: &mut BlockstoreInsertionMetrics,
+    metrics: &mut BlockstoreInsertionMetrics,
     // ws_metrics: &mut WindowServiceMetrics,
-    // completed_data_sets_sender: Option<&CompletedDataSetsSender>,
-    // retransmit_sender: &Sender<Vec<ShredPayload>>,
+    completed_data_sets_sender: Option<&CompletedDataSetsSender>,
+    retransmit_sender: &Sender<Vec<ShredPayload>>,
     outstanding_requests: &RwLock<OutstandingShredRepairs>,
-    // reed_solomon_cache: &ReedSolomonCache,
+    reed_solomon_cache: &ReedSolomonCache,
     accept_repairs_only: bool,
 ) -> Result<()>
 where
@@ -202,7 +208,11 @@ where
     // ws_metrics.shred_receiver_elapsed_us += shred_receiver_elapsed.as_us();
     // ws_metrics.run_insert_count += 1;
     let handle_packet = |packet: &Packet| {
-        
+        // debug!("packet.meta().repair(): {}", packet.meta().repair());
+        debug!("packet meta size: {}", packet.meta().size);
+        if let Some(data) = packet.data(..) {
+            debug!("packet data length: {}", data.len());
+        }
         debug!("packet.meta().repair(): {}", packet.meta().repair());
         if packet.meta().discard() {
             debug!("packet.meta().discard(): {}", packet.meta().discard());
@@ -211,12 +221,12 @@ where
         // let shred = shred::layout::get_shred(packet);
         // debug!("get_shred: {}", shred);
         // let size = packet.data(..).len();
-        debug!("packet data: {:?}", packet.data(..));
+        // debug!("packet data: {:?}", packet.data(..));
         
         let shred = shred::layout::get_shred(packet)?;
-        debug!("get_shred:0");
+        // debug!("get_shred:0");
         let shred = Shred::new_from_serialized_shred(shred.to_vec()).ok()?;
-        debug!("get_shred:1");
+        // debug!("get_shred:1");
         debug!("handle_packet shred index: {}", shred.index());
         if packet.meta().repair() {
             let repair_info = RepairMeta {
@@ -253,27 +263,27 @@ where
         accept_repairs_only,
     );
     // ws_metrics.num_shreds_pruned_invalid_repair = num_shreds - shreds.len();
-    // let repairs: Vec<_> = repair_infos
-    //     .iter()
-    //     .map(|repair_info| repair_info.is_some())
-    //     .collect();
+    let repairs: Vec<_> = repair_infos
+        .iter()
+        .map(|repair_info| repair_info.is_some())
+        .collect();
     // prune_shreds_elapsed.stop();
     // ws_metrics.prune_shreds_elapsed_us += prune_shreds_elapsed.as_us();
-
-    // let completed_data_sets = blockstore.insert_shreds_handle_duplicate(
-    //     shreds,
-    //     repairs,
-    //     Some(leader_schedule_cache),
-    //     false, // is_trusted
-    //     Some(retransmit_sender),
-    //     &handle_duplicate,
-    //     reed_solomon_cache,
-    //     metrics,
-    // )?;
-
-    // if let Some(sender) = completed_data_sets_sender {
-    //     sender.try_send(completed_data_sets)?;
-    // }
+//    let mut metrics = BlockstoreInsertionMetrics::default();
+    let completed_data_sets = blockstore.insert_shreds_handle_duplicate(
+        shreds,
+        repairs,
+        Some(leader_schedule_cache),
+        false, // is_trusted
+        Some(retransmit_sender),
+        &handle_duplicate,
+        reed_solomon_cache,
+        metrics,
+    )?;
+    debug!("completed_data_sets: {}", completed_data_sets.len());
+    if let Some(sender) = completed_data_sets_sender {
+        sender.try_send(completed_data_sets)?;
+    }
 
     Ok(())
 }
@@ -286,8 +296,8 @@ fn start_insert_thread(
     leader_schedule_cache: Arc<LeaderScheduleCache>,
     verified_receiver: Receiver<Vec<PacketBatch>>,
     check_duplicate_sender: Sender<PossibleDuplicateShred>,
-    // completed_data_sets_sender: Option<CompletedDataSetsSender>,
-    // retransmit_sender: Sender<Vec<ShredPayload>>,
+    completed_data_sets_sender: Option<CompletedDataSetsSender>,
+    retransmit_sender: Sender<Vec<ShredPayload>>,
     outstanding_requests: Arc<RwLock<OutstandingShredRepairs>>,
     accept_repairs_only: bool,
 ) -> JoinHandle<()> {
@@ -299,14 +309,14 @@ fn start_insert_thread(
         .thread_name(|i| format!("solWinInsert{i:02}"))
         .build()
         .unwrap();
-    // let reed_solomon_cache = ReedSolomonCache::default();
+    let reed_solomon_cache = ReedSolomonCache::default();
     Builder::new()
         .name("solWinInsert".to_string())
         .spawn(move || {
             let handle_duplicate = |possible_duplicate_shred| {
                 let _ = check_duplicate_sender.send(possible_duplicate_shred);
             };
-            // let mut metrics = BlockstoreInsertionMetrics::default();
+            let mut metrics = BlockstoreInsertionMetrics::default();
             // let mut ws_metrics = WindowServiceMetrics::default();
             // let mut last_print = Instant::now();
             while !exit.load(Ordering::Relaxed) {
@@ -318,12 +328,12 @@ fn start_insert_thread(
                     &blockstore,
                     &leader_schedule_cache,
                     handle_duplicate,
-                    // &mut metrics,
+                    &mut metrics,
                     // &mut ws_metrics,
-                    // completed_data_sets_sender.as_ref(),
-                    // &retransmit_sender,
+                    completed_data_sets_sender.as_ref(),
+                    &retransmit_sender,
                     &outstanding_requests,
-                    // &reed_solomon_cache,
+                    &reed_solomon_cache,
                     accept_repairs_only,
                 ) {
                     // ws_metrics.record_error(&e);
@@ -345,75 +355,41 @@ fn start_insert_thread(
 }
 
 
-pub fn spawn_shred_sigverify(
-    cluster_info: Arc<ClusterInfo>,
-    bank_forks: Arc<RwLock<BankForks>>,
-    leader_schedule_cache: Arc<LeaderScheduleCache>,
-    shred_fetch_receiver: Receiver<PacketBatch>,
-    retransmit_sender: Sender<Vec</*shred:*/ Vec<u8>>>,
-    verified_sender: Sender<Vec<PacketBatch>>,
-) -> JoinHandle<()> {
-    let test_loop = move || {
-        for mut packet_batch in shred_fetch_receiver {
-            debug!("spawn_shred_sigverify packet_batch: {} ",packet_batch.len());
-        }
-    };
-    Builder::new()
-        .name("solShredVerifr".to_string())
-        .spawn(test_loop)
-        .unwrap()
-
-
-    // let recycler_cache = RecyclerCache::warmed();
-    // let mut stats = ShredSigVerifyStats::new(Instant::now());
-    // let cache = RwLock::new(LruCache::new(SIGVERIFY_LRU_CACHE_CAPACITY));
-    // let cluster_nodes_cache = ClusterNodesCache::<RetransmitStage>::new(
-    //     CLUSTER_NODES_CACHE_NUM_EPOCH_CAP,
-    //     CLUSTER_NODES_CACHE_TTL,
-    // );
-    // let thread_pool = ThreadPoolBuilder::new()
-    //     .num_threads(get_thread_count())
-    //     .thread_name(|i| format!("solSvrfyShred{i:02}"))
-    //     .build()
-    //     .unwrap();
-    // let run_shred_sigverify = move || {
-    //     let mut rng = rand::thread_rng();
-    //     let mut deduper = Deduper::<2, [u8]>::new(&mut rng, DEDUPER_NUM_BITS);
-    //     loop {
-    //         if deduper.maybe_reset(&mut rng, DEDUPER_FALSE_POSITIVE_RATE, DEDUPER_RESET_CYCLE) {
-    //             stats.num_deduper_saturations += 1;
-    //         }
-    //         // We can't store the keypair outside the loop
-    //         // because the identity might be hot swapped.
-    //         let keypair: Arc<Keypair> = cluster_info.keypair().clone();
-    //         match run_shred_sigverify(
-    //             &thread_pool,
-    //             &keypair,
-    //             &cluster_info,
-    //             &bank_forks,
-    //             &leader_schedule_cache,
-    //             &recycler_cache,
-    //             &deduper,
-    //             &shred_fetch_receiver,
-    //             &retransmit_sender,
-    //             &verified_sender,
-    //             &cluster_nodes_cache,
-    //             &cache,
-    //             &mut stats,
-    //         ) {
-    //             Ok(()) => (),
-    //             Err(Error::RecvTimeout) => (),
-    //             Err(Error::RecvDisconnected) => break,
-    //             Err(Error::SendError) => break,
-    //         }
-    //         stats.maybe_submit();
-    //     }
-    // };
-    // Builder::new()
-    //     .name("solShredVerifr".to_string())
-    //     .spawn(run_shred_sigverify)
-    //     .unwrap()
-}
+// pub fn spawn_shred_sigverify(
+//     cluster_info: Arc<ClusterInfo>,
+//     bank_forks: Arc<RwLock<BankForks>>,
+//     leader_schedule_cache: Arc<LeaderScheduleCache>,
+//     shred_fetch_receiver: Receiver<PacketBatch>,
+//     retransmit_sender: Sender<Vec</*shred:*/ Vec<u8>>>,
+//     verified_sender: Sender<Vec<PacketBatch>>,
+// ) -> JoinHandle<()> {
+//     let test_loop = move || {
+//         for mut packet_batch in shred_fetch_receiver {
+//             debug!("spawn_shred_sigverify packet_batch: {} ", packet_batch.len());
+            
+//             // Process each packet in the batch
+//             for packet in packet_batch.iter_mut() {
+//                 if packet.meta().discard() {
+//                     continue;
+//                 }
+                
+//                 // Set the size of the packet data
+//                 let buffer = packet.buffer_mut();
+//                 packet.meta_mut().size = buffer.len();
+//                 debug!("packet meta size set to: {}", packet.meta().size);
+//             }
+            
+//             // Send the processed batch to the verified sender
+//             if let Err(e) = verified_sender.send(vec![packet_batch]) {
+//                 error!("Failed to send verified packet batch: {:?}", e);
+//             }
+//         }
+//     };
+//     Builder::new()
+//         .name("solShredVerifr".to_string())
+//         .spawn(test_loop)
+//         .unwrap()
+// }
 
 impl ShredCollectorService {
     
@@ -460,6 +436,17 @@ impl ShredCollectorService {
                     Arc::new(AtomicBool::new(false)),
                     None,
                 );
+
+                let collector = solana_sdk::pubkey::new_rand();
+
+                // let mut new_bank_time = Measure::start("new_bank");
+                let new_slot = bank.slot() + 1;
+                let root_bank: Arc<Bank> = Arc::new(bank);
+        
+                let bank = Bank::new_from_parent(root_bank, &collector, start_slot);
+          
+
+                // bank.set_root_slot(start_slot);
 
                 debug!("Bank created successfully");
                 
@@ -573,6 +560,16 @@ impl ShredCollectorService {
              
 
                 let (duplicate_sender, duplicate_receiver) = unbounded();
+                let (completed_data_sets_sender, completed_data_sets_receiver) =
+                bounded(MAX_COMPLETED_DATA_SETS_IN_CHANNEL);
+
+                // let completed_data_sets_service = CompletedDataSetsService::new(
+                //     completed_data_sets_receiver,
+                //     blockstore.clone(),
+                //     rpc_subscriptions.clone(),
+                //     exit.clone(),
+                //     max_slots.clone(),
+                // );
 
                 let insert_thread = start_insert_thread(
                     exit.clone(),
@@ -580,8 +577,8 @@ impl ShredCollectorService {
                     leader_schedule_cache.clone(),
                     verified_receiver,
                     duplicate_sender,
-                    // completed_data_sets_sender,
-                    // retransmit_sender,
+                    Some(completed_data_sets_sender),
+                    retransmit_sender,
                     outstanding_requests,
                     accept_repairs_only,
                 );
