@@ -1219,7 +1219,7 @@ impl ServeRepair {
 
     /// Distinguish and process `RepairResponse` ping packets ignoring other
     /// packets in the batch.
-    pub(crate) fn handle_repair_response_pings(
+    pub fn handle_repair_response_pings(
         repair_socket: &UdpSocket,
         keypair: &Keypair,
         packet_batch: &mut PacketBatch,

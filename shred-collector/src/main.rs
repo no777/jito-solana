@@ -30,6 +30,7 @@ use {
     },
     solana_streamer::socket::SocketAddrSpace,
     service::ShredCollectorService,
+    service::ShredCollectorServiceConfig,
     std::{
         net::{IpAddr, Ipv4Addr, SocketAddr,  ToSocketAddrs,UdpSocket},
         path::PathBuf,
@@ -287,7 +288,10 @@ fn main() {
     );
 
    
+    let mut config  = ShredCollectorServiceConfig::default();
+    config.shred_version = node.info.shred_version();
     let shred_collector = ShredCollectorService::new(
+        config,
         node.clone(),
         blockstore,
         repair_socket,
