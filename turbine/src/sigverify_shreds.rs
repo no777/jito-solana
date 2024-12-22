@@ -88,6 +88,8 @@ pub fn spawn_shred_sigverify(
             }
             // We can't store the keypair outside the loop
             // because the identity might be hot swapped.
+            // debug!("run_shred_sigverify");
+
             let keypair: Arc<Keypair> = cluster_info.keypair().clone();
             match run_shred_sigverify(
                 &thread_pool,
@@ -134,11 +136,15 @@ fn run_shred_sigverify<const K: usize>(
     cache: &RwLock<LruCache>,
     stats: &mut ShredSigVerifyStats,
 ) -> Result<(), Error> {
+    // debug!("run_shred_sigverify ");
     const RECV_TIMEOUT: Duration = Duration::from_secs(1);
     let packets = shred_fetch_receiver.recv_timeout(RECV_TIMEOUT)?;
+    // debug!("run_shred_sigverify 1");
+
     let mut packets: Vec<_> = std::iter::once(packets)
         .chain(shred_fetch_receiver.try_iter())
         .collect();
+    debug!("run_shred_sigverify packet_batch: {} ",packets.len());
     let now = Instant::now();
     stats.num_iters += 1;
     stats.num_batches += packets.len();
@@ -162,6 +168,9 @@ fn run_shred_sigverify<const K: usize>(
         let bank_forks = bank_forks.read().unwrap();
         (bank_forks.working_bank(), bank_forks.root_bank())
     };
+
+    // debug!("verify_packets");
+
     verify_packets(
         thread_pool,
         &keypair.pubkey(),
@@ -171,6 +180,7 @@ fn run_shred_sigverify<const K: usize>(
         &mut packets,
         cache,
     );
+    // debug!("verify_packets end");
     stats.num_discards_post += count_discards(&packets);
     // Verify retransmitter's signature, and resign shreds
     // Merkle root as the retransmitter node.
@@ -227,6 +237,9 @@ fn run_shred_sigverify<const K: usize>(
                 }
             })
     });
+
+    // debug!("run_shred_sigverify 2");
+
     stats.resign_micros += resign_start.elapsed().as_micros() as u64;
     // Exclude repair packets from retransmit.
     let shreds: Vec<_> = packets
@@ -237,9 +250,19 @@ fn run_shred_sigverify<const K: usize>(
         .map(<[u8]>::to_vec)
         .collect();
     stats.num_retransmit_shreds += shreds.len();
-    retransmit_sender.send(shreds)?;
-    verified_sender.send(packets)?;
+    if let Err(err) = retransmit_sender.send(shreds) {
+        error!("retransmit_sender.send(packet_batch) failed {}", err);
+    }
+
+    // retransmit_sender.send(shreds)?;
+    // verified_sender.send(packets)?;
+    if let Err(err) = verified_sender.send(packets) {
+        error!("verified_sender.send(packet_batch) failed {}", err);
+    }
+
     stats.elapsed_micros += now.elapsed().as_micros() as u64;
+    // debug!("run_shred_sigverify end");
+
     Ok(())
 }
 

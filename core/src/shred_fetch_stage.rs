@@ -78,8 +78,8 @@ impl ShredFetchStage {
         };
 
         for mut packet_batch in recvr {
-            debug!("packet_batch: {} ",packet_batch.len());
-       
+            debug!("modify_packets {} packet_batch: {} ",name,packet_batch.len());
+
             if last_updated.elapsed().as_millis() as u64 > DEFAULT_MS_PER_SLOT {
                 last_updated = Instant::now();
                 let root_bank = {
@@ -139,8 +139,8 @@ impl ShredFetchStage {
                 }
             }
             stats.maybe_submit(name, STATS_SUBMIT_CADENCE);
-            if sendr.send(packet_batch).is_err() {
-                break;
+            if let Err(err) = sendr.send(packet_batch) {
+                error!("sendr.send(packet_batch) failed {}", err);
             }
         }
     }
@@ -216,7 +216,7 @@ impl ShredFetchStage {
         turbine_disabled: Arc<AtomicBool>,
         exit: Arc<AtomicBool>,
     ) -> Self {
-        let recycler = PacketBatchRecycler::warmed(100, 1024);
+        let recycler: solana_perf::recycler::Recycler<solana_perf::cuda_runtime::PinnedVec<solana_sdk::packet::Packet>> = PacketBatchRecycler::warmed(100, 1024);
 
         let (mut tvu_threads, tvu_filter) = Self::packet_modifier(
             "solRcvrShred",
@@ -323,7 +323,7 @@ impl ShredFetchStage {
         }
     }
 
-    pub(crate) fn join(self) -> thread::Result<()> {
+    pub fn join(self) -> thread::Result<()> {
         for thread_hdl in self.thread_hdls {
             thread_hdl.join()?;
         }

@@ -20,6 +20,8 @@ solana-accounts-db = { path = "../accounts-db" }
 solana-rpc = { path = "../rpc" }
 solana-poh = { path = "../poh" }
 solana-perf = { workspace = true }
+solana-turbine = { workspace = true }
+
 bytes = { workspace = true }
 itertools = "0.10.5"
 
