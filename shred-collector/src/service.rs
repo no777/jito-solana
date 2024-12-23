@@ -450,10 +450,11 @@ impl ShredCollectorService {
                 let cluster_slots = Arc::new(ClusterSlots::default());
 
                 // Initialize repair slots with start_slot
-                // let repair_slots = vec![start_slot];
-                let repair_slots = vec![];
+                let repair_slots = vec![start_slot];
+                // let repair_slots = vec![];
 
                 let wen_restart_repair_slots = Arc::new(RwLock::new(repair_slots));
+                let wen_restart_repair_slots = Some(wen_restart_repair_slots);
                 let epoch_schedule = bank_forks
                 .read()
                 .unwrap()
@@ -473,7 +474,7 @@ impl ShredCollectorService {
                     repair_validators: None,
                     repair_whitelist,
                     ancestor_duplicate_slots_sender,
-                    wen_restart_repair_slots: Some(wen_restart_repair_slots.clone()),
+                    wen_restart_repair_slots: None,
                 };
 
                 // Get ancestor hashes socket from node
