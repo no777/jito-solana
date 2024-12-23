@@ -421,7 +421,7 @@ impl RepairService {
                     ),
                 };
 
-                trace!("repaires: {:#?}", repairs);
+                debug!("repaires: {:#?}", repairs);
 
                 let mut popular_pruned_forks = repair_weight.get_popular_pruned_forks(
                     root_bank.epoch_stakes_map(),
