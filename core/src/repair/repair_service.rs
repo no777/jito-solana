@@ -421,8 +421,9 @@ impl RepairService {
                     ),
                 };
 
-                debug!("repaires: {:#?}", repairs);
-
+                if !repairs.is_empty() {
+                    info!("repaires: {} 0:{:#?}", repairs.len(),repairs[0].slot());
+                }
                 let mut popular_pruned_forks = repair_weight.get_popular_pruned_forks(
                     root_bank.epoch_stakes_map(),
                     root_bank.epoch_schedule(),
