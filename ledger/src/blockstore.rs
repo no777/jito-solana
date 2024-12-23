@@ -1019,9 +1019,11 @@ impl Blockstore {
                             } else {
                                 metrics.num_turbine_data_shreds_exists += 1;
                             }
+                            error!("blockstore error: InvalidShredError::Exists" );
                         }
                         Err(InsertDataShredError::InvalidShred) => {
-                            metrics.num_data_shreds_invalid += 1
+                            metrics.num_data_shreds_invalid += 1;
+                            error!("blockstore error: InvalidShredError::InvalidShred" );
                         }
                         Err(InsertDataShredError::BlockstoreError(err)) => {
                             metrics.num_data_shreds_blockstore_error += 1;
@@ -1710,7 +1712,7 @@ impl Blockstore {
                 entry.insert(WorkingEntry::Clean(meta));
             }
         }
-        debug!("check_insert_data_shred 2");
+        debug!("check_insert_data_shred 2 newly_completed_data_sets:{}",newly_completed_data_sets.len());
 
         Ok(newly_completed_data_sets)
     }
@@ -2174,6 +2176,8 @@ impl Blockstore {
 
         // Parent for slot meta should have been set by this point
         assert!(!slot_meta.is_orphan());
+
+        debug!("insert_data_shred slot {} index {} last_in_slot {} last_in_data: {}", slot, index, last_in_slot, last_in_data);
 
         let new_consumed = if slot_meta.consumed == index {
             let mut current_index = index + 1;
@@ -4559,6 +4563,9 @@ impl Blockstore {
     }
 }
 
+
+
+
 // Update the `completed_data_indexes` with a new shred `new_shred_index`. If a
 // data set is complete, return the range of shred indexes [start_index, end_index]
 // for that completed data set.
@@ -4569,6 +4576,7 @@ fn update_completed_data_indexes(
     // Shreds indices which are marked data complete.
     completed_data_indexes: &mut BTreeSet<u32>,
 ) -> Vec<(u32, u32)> {
+
     let start_shred_index = completed_data_indexes
         .range(..new_shred_index)
         .next_back()
@@ -4577,6 +4585,9 @@ fn update_completed_data_indexes(
     // Consecutive entries i, k, j in this vector represent potential ranges [i, k),
     // [k, j) that could be completed data ranges
     let mut shred_indices = vec![start_shred_index];
+
+   
+
     // `new_shred_index` is data complete, so need to insert here into the
     // `completed_data_indexes`
     if is_last_in_data {
@@ -4584,17 +4595,54 @@ fn update_completed_data_indexes(
         shred_indices.push(new_shred_index + 1);
     }
     if let Some(index) = completed_data_indexes.range(new_shred_index + 1..).next() {
+        debug!(
+            "Found next completed index {} after new_index {}",
+            index,
+            new_shred_index
+        );
         shred_indices.push(index + 1);
     }
-    shred_indices
+
+    debug!("completed_data_indexes {}",completed_data_indexes.len()); 
+    debug!(
+        "Checking ranges: shred_indices={:?}, received_shreds_len={}",
+        shred_indices,
+        received_data_shreds.num_shreds(),
+    );
+    
+    debug!(
+        "received_data_shreds: total_count={}, indices={:?}, first={:?}, last={:?}",
+        received_data_shreds.num_shreds(),
+        received_data_shreds.indices().collect::<Vec<_>>(),
+        received_data_shreds.first(),
+        received_data_shreds.last()
+    );
+
+    debug!("update_completed_data_indexes index {} start_shred_index {} shred_indices {}", new_shred_index,start_shred_index, shred_indices.len());
+let result = shred_indices
         .windows(2)
         .filter(|ix| {
             let (begin, end) = (ix[0] as u64, ix[1] as u64);
             let num_shreds = (end - begin) as usize;
-            received_data_shreds.range(begin..end).count() == num_shreds
+            let received_count = received_data_shreds.range(begin..end).count();
+            debug!(
+                "Checking range [{}, {}): expected={}, received={}",
+                begin,
+                end,
+                num_shreds,
+                received_count
+            );
+            received_count == num_shreds
         })
         .map(|ix| (ix[0], ix[1] - 1))
-        .collect()
+        .collect::<Vec<_>>();
+
+    debug!(
+        "Completed ranges: {:?}",
+        result
+    );
+
+    result
 }
 
 fn update_slot_meta(

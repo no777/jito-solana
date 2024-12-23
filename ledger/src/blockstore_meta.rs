@@ -269,6 +269,18 @@ impl ShredIndex {
     pub(crate) fn insert(&mut self, index: u64) {
         self.index.insert(index);
     }
+
+    pub fn first(&self) -> Option<&u64> {
+        self.index.first()
+    }
+
+    pub fn last(&self) -> Option<&u64> {
+        self.index.last()
+    }
+
+    pub fn indices(&self) -> impl Iterator<Item = &u64> {
+        self.index.iter()
+    }
 }
 
 impl SlotMeta {
