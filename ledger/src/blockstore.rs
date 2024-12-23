@@ -1712,8 +1712,9 @@ impl Blockstore {
                 entry.insert(WorkingEntry::Clean(meta));
             }
         }
-        debug!("check_insert_data_shred 2 newly_completed_data_sets:{}",newly_completed_data_sets.len());
-
+        if(newly_completed_data_sets.len() > 0) {
+            info!("have completed_data_sets:{} slot: {slot}, index: {shred_index}",newly_completed_data_sets.len());
+        }
         Ok(newly_completed_data_sets)
     }
 
