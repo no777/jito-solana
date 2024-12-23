@@ -1019,15 +1019,15 @@ impl Blockstore {
                             } else {
                                 metrics.num_turbine_data_shreds_exists += 1;
                             }
-                            error!("blockstore error: InvalidShredError::Exists" );
+                            trace!("blockstore error: InvalidShredError::Exists" );
                         }
                         Err(InsertDataShredError::InvalidShred) => {
                             metrics.num_data_shreds_invalid += 1;
-                            error!("blockstore error: InvalidShredError::InvalidShred" );
+                            trace!("blockstore error: InvalidShredError::InvalidShred" );
                         }
                         Err(InsertDataShredError::BlockstoreError(err)) => {
                             metrics.num_data_shreds_blockstore_error += 1;
-                            error!("blockstore error: {}", err);
+                            trace!("blockstore error: {}", err);
                         }
                         Ok(completed_data_sets) => {
                             if is_repaired {

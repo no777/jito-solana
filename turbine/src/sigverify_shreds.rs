@@ -252,13 +252,13 @@ fn run_shred_sigverify<const K: usize>(
         .collect();
     stats.num_retransmit_shreds += shreds.len();
     if let Err(err) = retransmit_sender.send(shreds) {
-        error!("retransmit_sender.send(packet_batch) failed {}", err);
+        trace!("retransmit_sender.send(packet_batch) failed {}", err);
     }
 
     // retransmit_sender.send(shreds)?;
     // verified_sender.send(packets)?;
     if let Err(err) = verified_sender.send(packets) {
-        error!("verified_sender.send(packet_batch) failed {}", err);
+        trace!("verified_sender.send(packet_batch) failed {}", err);
     }
 
     stats.elapsed_micros += now.elapsed().as_micros() as u64;
