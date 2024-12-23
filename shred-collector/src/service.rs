@@ -1,7 +1,7 @@
 use {
     log::*,
     solana_gossip::cluster_info::{ClusterInfo, Node},
-    crossbeam_channel::{bounded,unbounded, Receiver, Sender},
+    crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError},
     rayon::{prelude::*, ThreadPool},
     solana_measure::measure::Measure,
 
@@ -197,7 +197,19 @@ where
 {
     const RECV_TIMEOUT: Duration = Duration::from_millis(200);
     let mut shred_receiver_elapsed = Measure::start("shred_receiver_elapsed");
-    let mut packets = verified_receiver.recv_timeout(RECV_TIMEOUT)?;
+    // let mut packets = verified_receiver.recv_timeout(RECV_TIMEOUT)?;
+
+    // 首先尝试立即获取数据
+    let mut packets = match verified_receiver.try_recv() {
+        Ok(packets) => packets,
+        Err(TryRecvError::Empty) => {
+            // 如果没有数据，使用较短的超时时间等待
+            const SHORT_TIMEOUT: Duration = Duration::from_millis(100);
+            verified_receiver.recv_timeout(RECV_TIMEOUT)?
+        }
+        Err(TryRecvError::Disconnected) => return Ok(()),
+    };
+
     packets.extend(verified_receiver.try_iter().flatten());
     shred_receiver_elapsed.stop();
     // ws_metrics.shred_receiver_elapsed_us += shred_receiver_elapsed.as_us();
@@ -275,7 +287,7 @@ where
         reed_solomon_cache,
         metrics,
     )?;
-    debug!("completed_data_sets: {}", completed_data_sets.len());
+    // debug!("completed_data_sets: {}", completed_data_sets.len());
     if let Some(sender) = completed_data_sets_sender {
         sender.try_send(completed_data_sets)?;
     }
