@@ -5721,22 +5721,29 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "shred-collector"
 version = "2.1.0"
 dependencies = [
+ "bytes",
  "clap 2.34.0",
  "crossbeam-channel",
+ "itertools 0.10.5",
  "log",
  "rand 0.7.3",
+ "rayon",
  "solana-accounts-db",
  "solana-clap-utils",
  "solana-core",
  "solana-gossip",
  "solana-ledger",
  "solana-logger",
+ "solana-measure",
  "solana-net-utils",
+ "solana-perf",
  "solana-poh",
+ "solana-rayon-threadlimit",
  "solana-rpc",
  "solana-runtime",
  "solana-sdk",
  "solana-streamer",
+ "solana-turbine",
  "tokio",
 ]
 

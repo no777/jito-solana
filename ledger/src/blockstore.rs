@@ -1621,7 +1621,7 @@ impl Blockstore {
     ) -> std::result::Result<Vec<CompletedDataSetInfo>, InsertDataShredError> {
         let slot = shred.slot();
         let shred_index = u64::from(shred.index());
-        debug!("check_insert_data_shred slot: {slot}, index: {shred_index}");
+        trace!("check_insert_data_shred slot: {slot}, index: {shred_index}");
 
         let index_meta_working_set_entry =
             self.get_index_meta_entry(slot, index_working_set, index_meta_time_us);
@@ -1692,7 +1692,6 @@ impl Blockstore {
                 }
             }
         }
-        debug!("check_insert_data_shred 1");
 
         let newly_completed_data_sets = self.insert_data_shred(
             slot_meta,
@@ -2178,7 +2177,7 @@ impl Blockstore {
         // Parent for slot meta should have been set by this point
         assert!(!slot_meta.is_orphan());
 
-        debug!("insert_data_shred slot {} index {} last_in_slot {} last_in_data: {}", slot, index, last_in_slot, last_in_data);
+        trace!("insert_data_shred slot {} index {} last_in_slot {} last_in_data: {}", slot, index, last_in_slot, last_in_data);
 
         let new_consumed = if slot_meta.consumed == index {
             let mut current_index = index + 1;
