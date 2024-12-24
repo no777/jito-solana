@@ -79,7 +79,7 @@ impl ShredFetchStage {
         };
 
         for mut packet_batch in recvr {
-            debug!("modify_packets {} packet_batch: {} ",name,packet_batch.len());
+            trace!("modify_packets {} packet_batch: {} ",name,packet_batch.len());
 
             if last_updated.elapsed().as_millis() as u64 > DEFAULT_MS_PER_SLOT {
                 last_updated = Instant::now();
@@ -124,9 +124,9 @@ impl ShredFetchStage {
             };
             let turbine_disabled = turbine_disabled.load(Ordering::Relaxed);
             for packet in packet_batch.iter_mut().filter(|p| !p.meta().discard()) {
-                debug!("packet meta size: {}", packet.meta().size);
+                trace!("packet meta size: {}", packet.meta().size);
                 if let Some(data) = packet.data(..) {
-                    debug!("packet data length: {}", data.len());
+                    trace!("packet data length: {}", data.len());
                 }
                 if turbine_disabled
                     || should_discard_shred(
@@ -138,7 +138,7 @@ impl ShredFetchStage {
                         &mut stats,
                     )
                 {
-                    debug!("discarding packet last_root {} max_slot {} ",last_root,max_slot);
+                    trace!("discarding packet last_root {} max_slot {} ",last_root,max_slot);
                     packet.meta_mut().set_discard(true);
                 } else {
                     packet.meta_mut().flags.insert(flags);

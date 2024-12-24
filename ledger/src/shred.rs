@@ -1147,10 +1147,10 @@ pub fn should_discard_shred(
             return true;
         }
         Some(version) => {
-            debug!("Shred version mismatch: expected {shred_version}, got {version}");
 
             if version != shred_version {
-                 stats.shred_version_mismatch += 1;
+                debug!("Shred version mismatch: expected {shred_version}, got {version}");
+                stats.shred_version_mismatch += 1;
                 return true;
             }
         }

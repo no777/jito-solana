@@ -143,7 +143,7 @@ fn verify_repair(
         })
         .unwrap_or(true);
 
-    debug!("verify_repair {}",r);
+    // debug!("verify_repair {}",r);
     r
 }
 
@@ -216,13 +216,13 @@ where
     // ws_metrics.run_insert_count += 1;
     let handle_packet = |packet: &Packet| {
         // debug!("packet.meta().repair(): {}", packet.meta().repair());
-        debug!("packet meta size: {}", packet.meta().size);
+        trace!("packet meta size: {}", packet.meta().size);
         if let Some(data) = packet.data(..) {
-            debug!("packet data length: {}", data.len());
+            trace!("packet data length: {}", data.len());
         }
-        debug!("packet.meta().repair(): {}", packet.meta().repair());
+        trace!("packet.meta().repair(): {}", packet.meta().repair());
         if packet.meta().discard() {
-            debug!("packet.meta().discard(): {}", packet.meta().discard());
+            trace!("packet.meta().discard(): {}", packet.meta().discard());
             // return None;
         }
         // let shred = shred::layout::get_shred(packet);
@@ -234,7 +234,7 @@ where
         // debug!("get_shred:0");
         let shred = Shred::new_from_serialized_shred(shred.to_vec()).ok()?;
         // debug!("get_shred:1");
-        debug!("handle_packet shred slot:{} index: {}", shred.slot(), shred.index());
+        trace!("handle_packet shred slot:{} index: {}", shred.slot(), shred.index());
         if packet.meta().repair() {
             let repair_info = RepairMeta {
                 // If can't parse the nonce, dump the packet.
@@ -328,7 +328,7 @@ fn start_insert_thread(
             // let mut last_print = Instant::now();
             while !exit.load(Ordering::Relaxed) {
 
-                debug!("run_insert");   
+                // debug!("run_insert");   
                 if let Err(e) = run_insert(
                     &thread_pool,
                     &verified_receiver,

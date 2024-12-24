@@ -996,7 +996,7 @@ impl Blockstore {
             } else {
                 ShredSource::Turbine
             };
-            debug!("inserting shred: slot {}, index{} type: {:?}  source: {:?}", shred.slot(),shred.index(),shred.shred_type(),shred_source);
+            trace!("inserting shred: slot {}, index{} type: {:?}  source: {:?}", shred.slot(),shred.index(),shred.shred_type(),shred_source);
             match shred.shred_type() {
                 ShredType::Data => {
                     match self.check_insert_data_shred(
@@ -4596,7 +4596,7 @@ fn update_completed_data_indexes(
         shred_indices.push(new_shred_index + 1);
     }
     if let Some(index) = completed_data_indexes.range(new_shred_index + 1..).next() {
-        debug!(
+        trace!(
             "Found next completed index {} after new_index {}",
             index,
             new_shred_index
@@ -4604,29 +4604,24 @@ fn update_completed_data_indexes(
         shred_indices.push(index + 1);
     }
 
-    debug!("completed_data_indexes {}",completed_data_indexes.len()); 
-    debug!(
+    trace!("completed_data_indexes {}",completed_data_indexes.len()); 
+    trace!(
         "Checking ranges: shred_indices={:?}, received_shreds_len={}",
         shred_indices,
         received_data_shreds.num_shreds(),
     );
     
-    debug!(
-        "received_data_shreds: total_count={}, indices={:?}, first={:?}, last={:?}",
-        received_data_shreds.num_shreds(),
-        received_data_shreds.indices().collect::<Vec<_>>(),
-        received_data_shreds.first(),
-        received_data_shreds.last()
-    );
 
-    debug!("update_completed_data_indexes index {} start_shred_index {} shred_indices {}", new_shred_index,start_shred_index, shred_indices.len());
-let result = shred_indices
+
+    trace!("update_completed_data_indexes index {} start_shred_index {} shred_indices {}", new_shred_index,start_shred_index, shred_indices.len());
+    
+    let result = shred_indices
         .windows(2)
         .filter(|ix| {
             let (begin, end) = (ix[0] as u64, ix[1] as u64);
             let num_shreds = (end - begin) as usize;
             let received_count = received_data_shreds.range(begin..end).count();
-            debug!(
+            trace!(
                 "Checking range [{}, {}): expected={}, received={}",
                 begin,
                 end,
@@ -4638,7 +4633,7 @@ let result = shred_indices
         .map(|ix| (ix[0], ix[1] - 1))
         .collect::<Vec<_>>();
 
-    debug!(
+    trace!(
         "Completed ranges: {:?}",
         result
     );
@@ -4670,12 +4665,24 @@ fn update_slot_meta(
     if is_last_in_slot && slot_meta.last_index.is_none() {
         slot_meta.last_index = Some(u64::from(index));
     }
-    update_completed_data_indexes(
+
+    let shred_indices = update_completed_data_indexes(
         is_last_in_slot || is_last_in_data,
         index,
         received_data_shreds,
         &mut slot_meta.completed_data_indexes,
-    )
+    );
+    if shred_indices.len() > 0{    
+        debug!(
+            "received_data_shreds: slot {},total_count={}, indices={:?}, first={:?}, last={:?}",
+            slot_meta.slot,
+            received_data_shreds.num_shreds(),
+            received_data_shreds.indices().collect::<Vec<_>>(),
+            received_data_shreds.first(),
+            received_data_shreds.last()
+        );
+    }
+    shred_indices
 }
 
 fn get_last_hash<'a>(iterator: impl Iterator<Item = &'a Entry> + 'a) -> Option<Hash> {

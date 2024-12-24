@@ -144,7 +144,7 @@ fn run_shred_sigverify<const K: usize>(
     let mut packets: Vec<_> = std::iter::once(packets)
         .chain(shred_fetch_receiver.try_iter())
         .collect();
-    debug!("run_shred_sigverify packet_batch: {} ",packets.len());
+    trace!("run_shred_sigverify packet_batch: {} ",packets.len());
 
     let now = Instant::now();
     stats.num_iters += 1;
